@@ -77,11 +77,31 @@ Once upstream merges one of our PRs, its topic branch is done: delete it locally
 
 ## Deploying
 
-Deploy from a clean `pmpro` that is pushed to `fork`, after the checks above pass. The Worker is
-`pmpro-chat` (R2 bucket `pmpro-chat-files`) in PMPro's Cloudflare account. Pass only that
-account's token, `CF_API_TOKEN_PMPRO_EMBER` from `~/.env`, as `CLOUDFLARE_API_TOKEN` for the one
-command. Never source all of `~/.env`: its other Cloudflare tokens point wrangler at the wrong
-account. `pnpm run deploy` is described in `docs/self-hosting.md`.
+Deploy from a clean `pmpro` that is pushed to `fork`, after `pnpm typecheck`, `pnpm test` and
+**`pnpm build`**. Run the build on its own: the deploy uploads whatever is in `apps/web/dist`, so a
+build skipped because a test failed ships the new Worker with the old web app. The Worker is
+`pmpro-chat` (R2 bucket `pmpro-chat-files`, DO SQLite storage) in PMPro's Cloudflare account.
+
+Run the deploy in an **empty environment**. `scripts/deploy.ts` uploads every key it knows that the
+environment holds (`RESEND_API_KEY`, Memberful, WordPress, Turnstile and more) as Worker secrets, and
+Flint's shell profile loads `~/.env`, which holds unrelated ones, as well as `CF_*` tokens that wrangler
+reads for other accounts. On 2026-11-10 a deploy from the normal shell uploaded the basement's
+`RESEND_API_KEY` to `pmpro-chat`; it was deleted two minutes later.
+
+```sh
+T=$(grep '^CF_API_TOKEN_PMPRO_EMBER=' ~/.env | cut -d= -f2- | tr -d '"')
+A=$(curl -s -H "Authorization: Bearer $T" https://api.cloudflare.com/client/v4/accounts \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['result'][0]['id'])")
+env -i PATH="$PATH" HOME="$HOME" CLOUDFLARE_API_TOKEN="$T" CLOUDFLARE_ACCOUNT_ID="$A" pnpm run deploy
+```
+
+The deploy's first line says which keys it is uploading: only `CLOUDFLARE_ACCOUNT_ID` is expected. The
+WordPress sign-in keys are already secrets on the Worker and stay without being passed. Afterwards,
+check `https://chat.paidmembershipspro.com/api/health` and that a string new in the web app is in the
+live `assets/index-*.js`.
+
+`scripts/deploy.test.ts` fails on `pmpro` by design: it expects the stock `ember` names that
+`wrangler.jsonc` renames. Every other test passes.
 
 ## Related code outside this repo
 
@@ -96,6 +116,7 @@ account. `pnpm run deploy` is described in `docs/self-hosting.md`.
 |---|---|---|
 | [#273](https://github.com/NYLLON-SOFTWARE/ember-cloudflare/pull/273) Let bots read a thread | `bot-thread-read` | Open, no review yet; merged into `pmpro` |
 | [#274](https://github.com/NYLLON-SOFTWARE/ember-cloudflare/pull/274) Give bots the files people post | `bot-attachments` | Open, no review yet; merged into `pmpro` |
+| — Posts rooms (forum-style rooms, newest activity first) | `posts-rooms` | Not proposed upstream yet: open an issue first. Merged into `pmpro` and live since 2026-11-10 |
 
 `pmpro` also carries `f351abf2`, an early draft of #273 that the PR replaced. Drop it at the next
 sync if it conflicts. Update this table whenever a PR opens, merges or closes.
