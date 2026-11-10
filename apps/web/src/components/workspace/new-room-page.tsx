@@ -36,6 +36,7 @@ export function NewRoomPage({ access, me, onCreated, onFailed }: Props) {
   const [people, setPeople] = useState<User[] | null>(null);
   const [name, setName] = useState(DEFAULT_ROOM_NAME);
   const [icon, setIcon] = useState<RoomIconName | null>(null);
+  const [posts, setPosts] = useState(false);
   const [chosen, setChosen] = useState<ReadonlySet<UserId>>(new Set());
   const [saving, setSaving] = useState(false);
   // The room the unsaved changes dialog's Save made, while the app goes on to where the person was going.
@@ -65,7 +66,8 @@ export function NewRoomPage({ access, me, onCreated, onFailed }: Props) {
   /** Creates the room and lists it in the sidebar. */
   const send = () => {
     // The private form lists its creator with a check mark and sends them as one of its members.
-    const room: NewRoom = access === "open" ? { kind: access, name, icon: icon ?? "" } : { kind: access, name, icon: icon ?? "", memberIds: [me.id, ...chosen] };
+    const kept = posts ? { posts } : {};
+    const room: NewRoom = access === "open" ? { kind: access, name, icon: icon ?? "", ...kept } : { kind: access, name, icon: icon ?? "", ...kept, memberIds: [me.id, ...chosen] };
     return createRoom(room).then((room) => {
       onCreated(room);
       setCreated(room);
@@ -93,7 +95,7 @@ export function NewRoomPage({ access, me, onCreated, onFailed }: Props) {
 
   // Anything filled in, or the other form, which the page didn't open on, until the room's made.
   const changed =
-    people !== null && !saving && !created && (name !== DEFAULT_ROOM_NAME || icon !== null || access !== opened || (access === "closed" && chosen.size > 0));
+    people !== null && !saving && !created && (name !== DEFAULT_ROOM_NAME || icon !== null || posts || access !== opened || (access === "closed" && chosen.size > 0));
   return (
     // Go Back returns to Rooms and permissions.
     <SettingsPage back={workspaceSectionPath("channel-settings")}>
@@ -105,6 +107,8 @@ export function NewRoomPage({ access, me, onCreated, onFailed }: Props) {
             name={name}
             onNameChange={setName}
             icon={icon}
+            posts={posts}
+            onPostsChange={setPosts}
             onIconChange={setIcon}
             everyone={{ on: access === "open", onFlip: () => navigate(newRoomPath(access === "open" ? "closed" : "open"), { replace: true }) }}
             groups={[people]}

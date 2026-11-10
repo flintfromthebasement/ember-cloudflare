@@ -477,9 +477,10 @@ function applyFrame(state: RoomState, frame: ServerFrame, now: number): RoomStat
         refusedUnboosts: frame.failed === "boost.delete" ? state.refusedUnboosts + 1 : state.refusedUnboosts,
       };
     }
-    // A thread's, which its own state keeps.
+    // A thread's, or a posts room's posts, which their own states keep.
     case "thread.opened":
     case "thread.history":
+    case "posts":
     case "pong":
       return state;
   }

@@ -3,6 +3,7 @@ import {
   ASSISTANT_ID,
   CloseCode,
   HISTORY_PAGE_SIZE,
+  POSTS_PAGE_SIZE,
   isMessageTooLong,
   MAX_BOOST_LENGTH,
   MAX_MESSAGE_HTML_LENGTH,
@@ -875,6 +876,10 @@ export class ChatRoom extends DurableObject<Env> {
       case "thread.before": {
         const { messages, hasMore } = await store.repliesBefore(frame.parentId, frame.before, frame.limit ?? HISTORY_PAGE_SIZE);
         return this.send(ws, { type: "thread.history", parentId: frame.parentId, before: frame.before, messages, hasMore });
+      }
+      case "posts.before": {
+        const { posts, hasMore } = await store.posts(frame.limit ?? POSTS_PAGE_SIZE, frame.before);
+        return this.send(ws, { type: "posts", before: frame.before ?? null, posts, hasMore });
       }
       case "presence.visible": {
         const attachment = ws.deserializeAttachment() as Attachment;

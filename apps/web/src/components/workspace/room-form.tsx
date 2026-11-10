@@ -9,8 +9,8 @@ import { IconPicker } from "./icon-picker";
 import { ListRow, ListSeparator } from "./list-row";
 import { AvatarLink } from "./user-avatar";
 
-// The room forms, which New room and a room's settings share: the room's name and icon, who it's for,
-// and Save.
+// The room forms, which New room and a room's settings share: the room's name and icon, whether it's a
+// posts room, who it's for, and Save.
 
 /** How many people a form lists before it gets a filter. */
 const FILTER_ABOVE = 20;
@@ -25,6 +25,9 @@ interface Props<Person extends User> {
   /** The room's icon, or null for `#`, which only whoever can change the room sees, to pick another. */
   icon: RoomIconName | null;
   onIconChange: (icon: RoomIconName | null) => void;
+  /** Whether it's a posts room, which only whoever can change the room sees, to switch. */
+  posts: boolean;
+  onPostsChange: (posts: boolean) => void;
   /** The Everyone row, on for a room open to everyone, with a switch if `onFlip` is given; null for none. */
   everyone: { on: boolean; onFlip?: () => void } | null;
   /** The people listed, by name, in groups a line divides, such as a private room's members and everyone else. */
@@ -37,7 +40,7 @@ interface Props<Person extends User> {
   ref?: Ref<HTMLFormElement>;
 }
 
-export function RoomForm<Person extends User>({ canAdminister, name, onNameChange, icon, onIconChange, everyone, groups, mark, saving, onSave, ref }: Props<Person>) {
+export function RoomForm<Person extends User>({ canAdminister, name, onNameChange, icon, onIconChange, posts, onPostsChange, everyone, groups, mark, saving, onSave, ref }: Props<Person>) {
   const save = (event: FormEvent) => {
     event.preventDefault();
     onSave();
@@ -63,6 +66,7 @@ export function RoomForm<Person extends User>({ canAdminister, name, onNameChang
       )}
 
       {canAdminister && <IconPicker icon={icon} onChange={onIconChange} disabled={saving} />}
+      {canAdminister && <PostsSwitch posts={posts} onChange={onPostsChange} disabled={saving} />}
 
       {/* Saving sends who the switches showed when Save was pressed, so they wait until it's done. */}
       <fieldset disabled={saving} className="my-4 min-w-0 rounded-[10px] border bg-surface px-[1ch]">
@@ -71,6 +75,23 @@ export function RoomForm<Person extends User>({ canAdminister, name, onNameChang
 
       {canAdminister && <SubmitButton disabled={saving}>Save</SubmitButton>}
     </form>
+  );
+}
+
+/** Whether the room is a posts room, with what that means. */
+function PostsSwitch({ posts, onChange, disabled }: { posts: boolean; onChange: (posts: boolean) => void; disabled: boolean }) {
+  return (
+    <div className="mt-[22px] flex items-center gap-x-[1ch] text-start">
+      <div className="min-w-0 flex-1">
+        <p id="room_posts" className="font-semibold">
+          Posts
+        </p>
+        <p id="room_posts_description" className="text-sm text-muted-foreground">
+          Every message is a post that people reply to in its thread, and the newest activity shows first, as in a forum. Suits slower conversations.
+        </p>
+      </div>
+      <Switch checked={posts} onCheckedChange={onChange} disabled={disabled} aria-labelledby="room_posts" aria-describedby="room_posts_description" />
+    </div>
   );
 }
 

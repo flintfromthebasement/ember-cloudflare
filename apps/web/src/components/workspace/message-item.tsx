@@ -68,6 +68,8 @@ interface Props {
   thread?: ThreadPlace;
   /** Whether the message's thread is open beside its room, which marks it there, as Slack does. */
   open?: boolean;
+  /** Whether it's a post in a posts room, whose card shows its replies in place of its thread's summary. */
+  post?: boolean;
 }
 
 /**
@@ -166,7 +168,7 @@ function ReplyContext({ message, thread }: { message: Message; thread?: ThreadPl
  * for its avatar, with the space above a run's first message, so it doesn't read as the message before
  * it going on.
  */
-function DeletedMessage({ message, thread, open }: { message: Message; thread?: ThreadPlace; open?: boolean }) {
+function DeletedMessage({ message, thread, open, post }: { message: Message; thread?: ThreadPlace; open?: boolean; post?: boolean }) {
   return (
     <article
       className={cn(
@@ -177,7 +179,7 @@ function DeletedMessage({ message, thread, open }: { message: Message; thread?: 
       <div aria-hidden className="mt-2 size-9 rounded-[6px] bg-border max-md:size-[30px]" />
       <div data-body-content className="col-start-2 min-w-0 py-1">
         <p className="text-[15px] leading-[22px] text-message-muted">This message was deleted.</p>
-        {!thread && message.thread && <ThreadSummary message={message} />}
+        {!thread && !post && message.thread && <ThreadSummary message={message} />}
       </div>
     </article>
   );
@@ -203,7 +205,7 @@ function Author({ user }: { user: User }) {
 }
 
 /** One message: a 36px avatar gutter, author and time, then the body. */
-export const MessageItem = memo(function MessageItem({ message, me, threaded: follows, editing: editorOpen, actions, editors, thread, open }: Props) {
+export const MessageItem = memo(function MessageItem({ message, me, threaded: follows, editing: editorOpen, actions, editors, thread, open, post }: Props) {
   const article = useRef<HTMLElement>(null);
   const menu = useRef<MessageActionsHandle>(null);
   const attachEditor = useCallback((editor: MessageEditorHandle | null) => editors.attach(message.id, editor), [editors, message.id]);
@@ -254,7 +256,7 @@ export const MessageItem = memo(function MessageItem({ message, me, threaded: fo
     </PageLink>
   );
 
-  if (message.deleted) return <DeletedMessage message={message} thread={thread} open={open} />;
+  if (message.deleted) return <DeletedMessage message={message} thread={thread} open={open} post={post} />;
   if (shown === null) return <UnrenderableMessage />;
 
   return (
@@ -360,7 +362,7 @@ export const MessageItem = memo(function MessageItem({ message, me, threaded: fo
           )}
 
           {/* As Slack has it, under the reactions. */}
-          {!thread && message.thread && <ThreadSummary message={message} />}
+          {!thread && !post && message.thread && <ThreadSummary message={message} />}
         </div>
       )}
 
