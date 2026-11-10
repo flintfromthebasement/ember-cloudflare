@@ -37,3 +37,9 @@ Slack-like chat on Cloudflare Workers and Durable Objects. See `docs/development
   and use `React.lazy` where it suggests `next/dynamic`.
 - Write code that reads like the surrounding code: small, clearly named functions, and comments
   only where the behavior is non-obvious.
+
+## PMPro's fork
+
+This copy is PMPro's fork, deployed from the `pmpro` branch. Before you branch, commit, open a PR
+or deploy, read `PMPRO-FORK.md`: it says which work goes upstream, which stays here, and how to keep
+the branches apart.
