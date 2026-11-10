@@ -1790,7 +1790,7 @@ export const POSTS_PAGE_SIZE = 20;
 export const POST_REPLIES_SHOWN = 2;
 
 /** How many more comments View more comments brings. */
-export const COMMENTS_PAGE_SIZE = 10;
+export const COMMENTS_PAGE_SIZE = 5;
 
 /** How many of a comment's replies View replies brings at a time. */
 export const COMMENT_REPLIES_PAGE_SIZE = 5;

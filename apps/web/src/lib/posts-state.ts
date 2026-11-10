@@ -14,11 +14,16 @@ export interface PostsState {
   loaded: boolean;
   /** Whether a reply came to a post the feed doesn't have, which asking for the newest page brings. */
   stale: boolean;
+  /**
+   * Whether posts have had activity that would move them up, which waits for the reader to ask, so a card
+   * never moves while someone is reading or writing in it.
+   */
+  moved: boolean;
 }
 
-export type PostsAction = { type: "frame"; frame: ServerFrame } | { type: "loading" };
+export type PostsAction = { type: "frame"; frame: ServerFrame } | { type: "loading" } | { type: "reorder" };
 
-export const initialPostsState: PostsState = { posts: [], hasMore: false, loading: false, loaded: false, stale: false };
+export const initialPostsState: PostsState = { posts: [], hasMore: false, loading: false, loaded: false, stale: false, moved: false };
 
 /** Posts newest activity first, as the room orders them. */
 const byActivity = (posts: Post[]) => posts.sort((a, b) => (a.activeId < b.activeId ? 1 : a.activeId > b.activeId ? -1 : 0));
@@ -41,24 +46,30 @@ function received(state: PostsState, message: Message): PostsState {
   }
   const post = state.posts.find((post) => post.message.id === parentId);
   if (!post) return { ...state, stale: true };
-  const replies = [...post.replies.filter((reply) => reply.id !== message.id), message].slice(-POST_REPLIES_SHOWN);
+  const comment = message.replyToId === undefined;
+  const replies = comment ? [...post.replies.filter((reply) => reply.id !== message.id), message].slice(-POST_REPLIES_SHOWN) : post.replies;
   const activeId = message.id > post.activeId ? message.id : post.activeId;
-  return { ...state, posts: byActivity(state.posts.map((p) => (p === post ? { ...post, replies, activeId } : p))) };
+  const posts = state.posts.map((p) => (p === post ? { ...post, replies, activeId } : p));
+  // It goes up once the reader asks, unless it's on top already.
+  return { ...state, posts, moved: state.moved || state.posts[0] !== post };
 }
 
 /** The feed with a page of posts: the newest in place of what it showed, or older ones after it. */
 function paged(state: PostsState, { before, posts, hasMore }: Extract<ServerFrame, { type: "posts" }>): PostsState {
-  if (before === null) return { posts, hasMore, loading: false, loaded: true, stale: false };
+  if (before === null) return { posts, hasMore, loading: false, loaded: true, stale: false, moved: false };
   const shown = new Set(state.posts.map((post) => post.message.id));
   return { ...state, posts: [...state.posts, ...posts.filter((post) => !shown.has(post.message.id))], hasMore, loading: false };
 }
 
 export function postsReducer(state: PostsState, action: PostsAction): PostsState {
   if (action.type === "loading") return { ...state, loading: true };
+  if (action.type === "reorder") return { ...state, posts: byActivity([...state.posts]), moved: false };
   const { frame } = action;
   switch (frame.type) {
     case "posts":
       return paged(state, frame);
+    case "post":
+      return { posts: frame.post ? [frame.post] : [], hasMore: false, loading: false, loaded: true, stale: false, moved: false };
     case "message.created":
       return received(state, frame.message);
     case "message.updated":

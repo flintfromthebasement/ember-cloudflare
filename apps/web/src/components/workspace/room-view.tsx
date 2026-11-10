@@ -96,7 +96,7 @@ export function RoomView({ room, messageId, threadId, replyId, invitation, onDis
   const { editing, editors } = useMessageEditors(composer);
   useImperativeHandle(ref, () => ({ focusComposer: editors.returnFocus }), [editors]);
   // A thread that covers the room leaves nothing of it to reach until it's closed.
-  const covered = useMediaQuery(THREAD_COVERS_ROOM) && threadId !== undefined;
+  const covered = useMediaQuery(THREAD_COVERS_ROOM) && threadId !== undefined && !(room.kind !== "direct" && room.posts === true);
 
   // Up Arrow edits your newest message, unless it's still on its way, or the timeline is reading older
   // history and may not hold it.
@@ -152,9 +152,10 @@ export function RoomView({ room, messageId, threadId, replyId, invitation, onDis
           <RoomNotice notice={state.notice} onDismiss={dismissNotice} />
           {posts ? (
             <>
-              {/* As wide as the feed's cards, with the room around them. */}
-              <div className="mx-auto w-full max-w-[800px]">{composerShown}</div>
+              {/* As wide as the feed's cards, with the room around them; a post opened on its own has none. */}
+              {threadId === undefined && <div className="mx-auto w-full max-w-[800px]">{composerShown}</div>}
               <PostFeed
+                roomId={room.id}
                 roomName={name}
                 frames={frames}
                 state={state}
@@ -162,7 +163,9 @@ export function RoomView({ room, messageId, threadId, replyId, invitation, onDis
                 actions={deleted ? null : messageActions}
                 editing={editing}
                 editors={editors}
-                openThread={threadId}
+                postId={threadId}
+                commentId={replyId}
+                closed={deleted}
               />
             </>
           ) : (
@@ -188,7 +191,8 @@ export function RoomView({ room, messageId, threadId, replyId, invitation, onDis
           )}
         </MainContent>
       </div>
-      {threadId !== undefined && (
+      {/* A posts room opens a thread as its post, in the feed's place. */}
+      {threadId !== undefined && !posts && (
         <ThreadPanel
           key={threadId}
           room={room}
