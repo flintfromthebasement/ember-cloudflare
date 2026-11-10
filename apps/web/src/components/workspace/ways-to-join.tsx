@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import {
   domainsInWords,
+  inTermsOf,
   joinsWithLink,
   signsUpOpenly,
   signsUpWithEmailDomain,
@@ -12,6 +13,7 @@ import {
 import { PageLink } from "@/components/page-link";
 import { Switch } from "@/components/ui/switch";
 import { useAccount } from "@/hooks/use-account";
+import { useMembershipProvider } from "@/hooks/use-membership-provider";
 import { cn } from "@/lib/utils";
 import { EmailDomainSettings } from "./email-domain-settings";
 import { sendsEmail } from "./email-settings";
@@ -64,6 +66,7 @@ interface Props {
 /** Who can join, for administrators: a card for each way, with its switch, and its settings while it's on. */
 export function WaysToJoin({ settings, saveSwitch, saveEmailDomains, onSetUpEmail, onSetUpTurnstile, joinLink }: Props) {
   const account = useAccount();
+  const { name: provider } = useMembershipProvider();
   // The domains Email domain keeps, which the workspace shows only while it's on: as it last showed them,
   // saved here or in another tab, or else as the page loaded them. Set as it renders, rather than after,
   // so that the card never shows those it had before.
@@ -84,7 +87,7 @@ export function WaysToJoin({ settings, saveSwitch, saveEmailDomains, onSetUpEmai
 
   const switchTo = (setting: WaySetting) => (on: boolean) => {
     if (moved[setting] !== undefined) return;
-    const question = on ? ASKS_FIRST[setting] : undefined;
+    const question = on && ASKS_FIRST[setting] !== undefined ? inTermsOf(ASKS_FIRST[setting], provider) : undefined;
     if (question && !confirm(question)) return;
     setMoved((moved) => ({ ...moved, [setting]: on }));
     saveSwitch({ [setting]: on }, () => setMoved(({ [setting]: _, ...others }) => others));
@@ -105,7 +108,7 @@ export function WaysToJoin({ settings, saveSwitch, saveEmailDomains, onSetUpEmai
         description="Anyone can create an account at Ember's sign-up page."
         checked={open}
         onCheckedChange={switchTo("openSignUp")}
-        setAside={membersOnlyOverrides && !open ? MEMBERS_ONLY_OVERRIDES : null}
+        setAside={membersOnlyOverrides && !open ? inTermsOf(MEMBERS_ONLY_OVERRIDES, provider) : null}
       >
         <ShareableLink id="sign_up" label="Share so anyone can sign up" url={signUpUrl()} sharing={SIGN_UP_LINK} />
         {!account.restrictRoomCreation && (
@@ -130,7 +133,7 @@ export function WaysToJoin({ settings, saveSwitch, saveEmailDomains, onSetUpEmai
         description="Anyone with the link can create an account."
         checked={link}
         onCheckedChange={switchTo("joinLink")}
-        setAside={membersOnlyOverrides ? MEMBERS_ONLY_OVERRIDES : openOverrides ? OPEN_OVERRIDES : null}
+        setAside={membersOnlyOverrides ? inTermsOf(MEMBERS_ONLY_OVERRIDES, provider) : openOverrides ? OPEN_OVERRIDES : null}
       >
         {joinLink}
       </Way>
@@ -143,7 +146,7 @@ export function WaysToJoin({ settings, saveSwitch, saveEmailDomains, onSetUpEmai
         saveDomains={saveEmailDomains}
         onSetUpEmail={onSetUpEmail}
         onSetUpTurnstile={onSetUpTurnstile}
-        setAside={membersOnlyOverrides ? MEMBERS_ONLY_OVERRIDES : openOverrides ? OPEN_OVERRIDES : null}
+        setAside={membersOnlyOverrides ? inTermsOf(MEMBERS_ONLY_OVERRIDES, provider) : openOverrides ? OPEN_OVERRIDES : null}
       />
       <MemberfulSettings
         site={settings.memberfulSite}
@@ -209,6 +212,7 @@ function Way({ id, title, description, checked, onCheckedChange, setAside, child
  */
 export function HowPeopleJoin({ joinCode, memberfulSite }: { joinCode: string | null; memberfulSite: string | null }) {
   const account = useAccount();
+  const { name: provider } = useMembershipProvider();
   const open = signsUpOpenly(account);
   const linkCode = joinsWithLink(account) ? joinCode : null;
   // Open lets anyone in, people at the email domains too.
@@ -217,12 +221,12 @@ export function HowPeopleJoin({ joinCode, memberfulSite }: { joinCode: string | 
     if (account.memberfulSignIn)
       return (
         <p className="text-start">
-          <strong>Members sign in with Memberful</strong>, so the join link is off.
+          <strong>Members sign in with {provider}</strong>, so the join link is off.
         </p>
       );
     return account.memberfulJoin && memberfulSite !== null ? (
       <p className="text-start">
-        Members of <strong className="wrap-anywhere">{memberfulSite}</strong> join by signing in with Memberful.
+        Members of <strong className="wrap-anywhere">{memberfulSite}</strong> join by signing in with {provider}.
       </p>
     ) : (
       <p className="text-start">Only the people administrators invite can join.</p>

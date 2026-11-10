@@ -10,6 +10,7 @@ import { SignInPage } from "@/components/sign-in-page";
 import { TransferPage } from "@/components/transfer-page";
 import { Workspace, loadPageAhead } from "@/components/workspace/workspace";
 import { AccountContext } from "@/hooks/use-account";
+import { MembershipProviderContext } from "@/hooks/use-membership-provider";
 import { useAccountLogo } from "@/hooks/use-account-logo";
 import { useCustomStyles } from "@/hooks/use-custom-styles";
 import { PushProvider } from "@/hooks/use-push";
@@ -197,9 +198,11 @@ export function App() {
   // Keyed by who's signed in, so whoever signs in, or in another tab, doesn't see the last page's flash.
   return (
     <AccountContext value={workspace.account}>
-      <FlashProvider key={showsWorkspace ? me.id : "signed out"} workspace={showsWorkspace}>
-        {page()}
-      </FlashProvider>
+      <MembershipProviderContext value={workspace.membershipProvider}>
+        <FlashProvider key={showsWorkspace ? me.id : "signed out"} workspace={showsWorkspace}>
+          {page()}
+        </FlashProvider>
+      </MembershipProviderContext>
     </AccountContext>
   );
 }

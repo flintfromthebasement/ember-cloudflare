@@ -932,6 +932,8 @@ export interface Bootstrap {
    * in with an account there, as members who joined with it keep doing once it's off.
    */
   signInWithMemberful: boolean;
+  /** The kind of membership site its members sign in with, and what pages call it (`MembershipProvider`). */
+  membershipProvider: MembershipProvider;
   /**
    * The site key of the Turnstile widget whose check the open sign-up form shows, and the forms that ask
    * Ember to email a link to join or a code to reset a password, to check that whoever fills them in is a
@@ -1198,11 +1200,31 @@ export const MEMBERFUL_SIGN_IN_PATH = "/auth/memberful";
 /** Where Memberful sends the browser back to, which the Memberful site's custom app names as its OAuth redirect URL. */
 export const MEMBERFUL_CALLBACK_PATH = "/auth/memberful/callback";
 
+/** Where a WordPress site sends the browser back to, which Ember sends it as the `redirect_uri`, while the deployment signs in with one. */
+export const WORDPRESS_CALLBACK_PATH = "/auth/wordpress/callback";
+
 /**
  * Where the Memberful site's webhooks go, which say when a member's membership changes. Memberful signs
  * each, and the Worker checks what it says with Memberful.
  */
 export const MEMBERFUL_WEBHOOK_PATH = "/webhooks/memberful";
+
+/** Where a WordPress site's webhooks go, likewise. */
+export const WORDPRESS_WEBHOOK_PATH = "/webhooks/wordpress";
+
+/**
+ * The kind of site the deployment's members sign in with: Memberful, or a WordPress site whose plugin
+ * speaks Ember's sign-in (docs/self-hosting.md), once the deployment has its address (`WORDPRESS_URL`).
+ * Ember's settings and accounts call either Memberful, and its pages say `name` wherever they'd say it.
+ */
+export interface MembershipProvider {
+  kind: "memberful" | "wordpress";
+  /** "Memberful", or the WordPress site's name (`WORDPRESS_SITE_NAME`), else "WordPress". */
+  name: string;
+}
+
+/** `text`, which talks of Memberful, as it reads for the deployment's membership site, called `name`. */
+export const inTermsOf = (text: string, name: string) => (name === "Memberful" ? text : text.replaceAll("Memberful", name));
 
 /** Signing in with Memberful, coming back to `returnTo`, a page of the workspace, once signed in, or home without one. */
 export const memberfulSignInPath = (returnTo: string | null) =>

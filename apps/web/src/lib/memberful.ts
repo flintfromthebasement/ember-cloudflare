@@ -1,4 +1,5 @@
 import {
+  inTermsOf,
   MEMBERFUL_CONNECTED,
   MEMBERFUL_CONNECTED_NOTICE,
   MEMBERFUL_PROBLEM_PARAM,
@@ -27,10 +28,14 @@ export function forgetMemberfulOutcome(): void {
   history.replaceState(history.state, "", `${location.pathname}${search ? `?${search}` : ""}${location.hash}`);
 }
 
-/** What a page of the workspace flashes for what this page's address says a Memberful connection came to, taking it out of the address. */
-export function takeMemberfulFlash(): FlashMessage | null {
+/**
+ * What a page of the workspace flashes for what this page's address says a Memberful connection came to,
+ * in the terms of the membership site called `provider`, taking it out of the address.
+ */
+export function takeMemberfulFlash(provider: string): FlashMessage | null {
   const outcome = memberfulOutcomeOnArrival();
   forgetMemberfulOutcome();
   if (outcome === null) return null;
-  return outcome === MEMBERFUL_CONNECTED ? { kind: "notice", text: MEMBERFUL_CONNECTED_NOTICE } : { kind: "alert", text: MEMBERFUL_SIGN_IN_PROBLEMS[outcome] };
+  const text = outcome === MEMBERFUL_CONNECTED ? MEMBERFUL_CONNECTED_NOTICE : MEMBERFUL_SIGN_IN_PROBLEMS[outcome];
+  return { kind: outcome === MEMBERFUL_CONNECTED ? "notice" : "alert", text: inTermsOf(text, provider) };
 }

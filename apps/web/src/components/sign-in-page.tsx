@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   domainsInWords,
   EMAIL_SIGN_UP_PATH,
+  inTermsOf,
   MAX_PASSWORD_LENGTH,
   MEMBERFUL_CONNECTED,
   MEMBERFUL_SIGN_IN_PROBLEMS,
@@ -21,6 +22,7 @@ import { FIELD_INPUT, Field, PRIMARY_BUTTON, SubmitButton } from "@/components/f
 import { GuestSignIn } from "@/components/guest-sign-in";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useMembershipProvider } from "@/hooks/use-membership-provider";
 import { useTitle } from "@/hooks/use-title";
 import { ApiError, signIn } from "@/lib/api";
 import { forgetJoiningProblem, joiningProblemOnArrival } from "@/lib/joining";
@@ -50,6 +52,7 @@ function memberfulProblemOnArrival() {
  */
 export function SignInPage({ workspace, onSignedIn }: { workspace: SignedOutWorkspace; onSignedIn: (me: Me) => void }) {
   const { memberfulSignIn: membersOnly } = workspace.account;
+  const { name: provider } = useMembershipProvider();
   const [arrival] = useState(memberfulProblemOnArrival);
   const [asGuest, setAsGuest] = useState(false);
   // Someone whose Memberful email address is someone's here is asked for that someone's password.
@@ -57,7 +60,7 @@ export function SignInPage({ workspace, onSignedIn }: { workspace: SignedOutWork
   const [emailAddress, setEmailAddress] = useState(() => new URLSearchParams(location.search).get("email_address") ?? "");
   const [busy, setBusy] = useState(false);
   const [shaking, setShaking] = useState(false);
-  const [problem, setProblem] = useState<string | null>(() => (arrival ? MEMBERFUL_SIGN_IN_PROBLEMS[arrival] : joiningProblemOnArrival()));
+  const [problem, setProblem] = useState<string | null>(() => (arrival ? inTermsOf(MEMBERFUL_SIGN_IN_PROBLEMS[arrival], provider) : joiningProblemOnArrival()));
   /** Why the last sign-in was refused, said at the top of the form. */
   const [refusal, setRefusal] = useState<string | null>(null);
   /** Where to connect your Memberful account, once your password has checked out but you have yet to connect one. */
@@ -98,10 +101,10 @@ export function SignInPage({ workspace, onSignedIn }: { workspace: SignedOutWork
         {connection !== null ? (
           <>
             <AuthHeading title={`Sign in to ${workspace.account.name}`} logo={workspace.account.logo}>
-              Members sign in with Memberful now. Connect your Memberful account to keep signing in as yourself.
+              Members sign in with {provider} now. Connect your {provider} account to keep signing in as yourself.
             </AuthHeading>
             <Button asChild className={PRIMARY_BUTTON}>
-              <a href={connection}>Connect Memberful</a>
+              <a href={connection}>Connect {provider}</a>
             </Button>
           </>
         ) : asGuest ? (
@@ -153,7 +156,7 @@ export function SignInPage({ workspace, onSignedIn }: { workspace: SignedOutWork
             ) : (
               <Button asChild className={PRIMARY_BUTTON}>
                 {/* The Worker opens the page this tab was sent here from once it's signed in. The tab keeps it too, for a try that fails. */}
-                <a href={memberfulSignInPath(returnPath())}>Sign in with Memberful</a>
+                <a href={memberfulSignInPath(returnPath())}>Sign in with {provider}</a>
               </Button>
             )}
             {withPassword && workspace.passwordResetCodes && (
@@ -161,12 +164,12 @@ export function SignInPage({ workspace, onSignedIn }: { workspace: SignedOutWork
             )}
             {membersOnly ? (
               withPassword ? (
-                <AuthAlternative question="Member?" action="Sign in with Memberful" onClick={() => setWithPassword(false)} disabled={busy} />
+                <AuthAlternative question="Member?" action={`Sign in with ${provider}`} onClick={() => setWithPassword(false)} disabled={busy} />
               ) : (
                 <AuthAlternative question="Have a password?" action="Sign in with a password" onClick={() => setWithPassword(true)} />
               )
             ) : (
-              workspace.signInWithMemberful && <AuthAlternative question="Member?" action="Sign in with Memberful" href={memberfulSignInPath(returnPath())} />
+              workspace.signInWithMemberful && <AuthAlternative question="Member?" action={`Sign in with ${provider}`} href={memberfulSignInPath(returnPath())} />
             )}
             {signsUpOpenly(workspace.account) ? (
               <AuthAlternative question="New here?" action="Create an account" href={SIGN_UP_PATH} />

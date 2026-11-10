@@ -72,6 +72,27 @@ export interface Env {
   /** The secret Memberful signs its webhooks to `/webhooks/memberful` with, which its Webhooks settings show. */
   MEMBERFUL_WEBHOOK_SECRET?: string;
   /**
+   * The address of a WordPress site whose members may join and sign in instead of a Memberful site's,
+   * such as https://example.com, through a plugin that speaks Ember's sign-in (wordpress-api.ts,
+   * docs/self-hosting.md). Set, it's the deployment's membership site, and the Memberful keys above go
+   * unused. Without either of the plugin's two keys below, nobody signs in with it.
+   */
+  WORDPRESS_URL?: string;
+  /** The client id the plugin gives Ember. */
+  WORDPRESS_CLIENT_ID?: string;
+  /** The plugin's client secret, which never leaves the Worker. */
+  WORDPRESS_CLIENT_SECRET?: string;
+  /**
+   * The plugin's API key, with which the Workspace asks the site whose memberships are active, when a
+   * webhook says one changed, and once a day. Without it, only signing in checks a membership, and the
+   * site's webhooks are refused, as they are without the secret below.
+   */
+  WORDPRESS_API_KEY?: string;
+  /** The secret the plugin signs its webhooks to `/webhooks/wordpress` with. */
+  WORDPRESS_WEBHOOK_SECRET?: string;
+  /** What Ember's pages call the WordPress site where they'd say Memberful, such as the site's name. "WordPress" without it. */
+  WORDPRESS_SITE_NAME?: string;
+  /**
    * The site key of a Cloudflare Turnstile widget, whose check the open sign-up form shows, and the forms
    * that ask Ember to email a link to join or a code to reset a password, to check that whoever fills
    * them in is a person (turnstile.ts). With the secret key below, it takes the place of the keys an

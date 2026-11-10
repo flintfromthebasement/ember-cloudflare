@@ -1,4 +1,4 @@
-import { isReservedName, MAX_EMAIL_ADDRESS_LENGTH, MAX_USER_NAME_LENGTH } from "@ember/protocol";
+import { isReservedName, MAX_EMAIL_ADDRESS_LENGTH, MAX_USER_NAME_LENGTH, MEMBERFUL_CALLBACK_PATH, MEMBERFUL_WEBHOOK_PATH, type MembershipProvider } from "@ember/protocol";
 import type { Env } from "./env";
 import { isLoopback } from "./loopback";
 
@@ -8,18 +8,49 @@ import { isLoopback } from "./loopback";
 // says one changed, and once a day. Neither follows a redirect, which would take a secret elsewhere, and
 // Memberful's answers are logged by their status alone.
 
+/**
+ * How Ember talks to a kind of membership site: Memberful's, here, or a WordPress site's
+ * (wordpress-api.ts). The deployment has one (membership-site.ts), whose members sign in, and whose
+ * memberships are checked, the same way above this.
+ */
+export interface ProviderApi extends MembershipProvider {
+  /** Where the site sends the browser back to, and its webhooks go. */
+  callbackPath: string;
+  webhookPath: string;
+  /** The header the site signs a webhook in: the HMAC-SHA256 of its body, under the webhook's secret, in hex. */
+  signatureHeader: string;
+  /** The Worker secrets that hold the API key and the webhook's secret, which hearing webhooks takes. */
+  apiKeyName: "MEMBERFUL_API_KEY" | "WORDPRESS_API_KEY";
+  webhookSecretName: "MEMBERFUL_WEBHOOK_SECRET" | "WORDPRESS_WEBHOOK_SECRET";
+  /** The `error` the site sends the browser back with when whoever signed in there has no membership, if it says so. */
+  noMembershipError: string | null;
+  /** The deployment's keys for the site, or null without them all. */
+  keysOf(env: Env): MemberfulKeys | null;
+  /** Where to sign in at the site, which sends the browser back to `redirectUri` with `state`. */
+  authorizationOf(keys: MemberfulKeys, state: string, redirectUri: string): string;
+  /** Who signed in at the site to be given `code`, sent back to `redirectUri`, or null (`memberWhoSignedIn`). */
+  memberWhoSignedIn(keys: MemberfulKeys, code: string, redirectUri: string): Promise<MemberfulMember | null>;
+  /** Whether each of the members `subjects` name has an active membership, or null (`membershipsOf`). */
+  membershipsOf(api: MemberfulApi, subjects: string[]): Promise<Map<string, boolean> | null>;
+  /** The member a webhook's payload is about, by their id, or null for none. */
+  subjectOf(payload: unknown): string | null;
+}
+
 /** The deployment's Memberful site, and the keys of its custom app. */
 export interface MemberfulKeys {
   /** The site's origin, such as https://example.memberful.com, by which accounts on it are linked. */
   site: string;
   clientId: string;
   clientSecret: string;
+  /** How Ember talks to it. */
+  provider: ProviderApi;
 }
 
 /** What asking the Memberful site's admin API takes: the site, and its custom app's API key. */
 export interface MemberfulApi {
   site: string;
   apiKey: string;
+  provider: ProviderApi;
 }
 
 /** Someone who signed in to the Memberful site, as its member API describes them. */
@@ -49,6 +80,24 @@ const MEMBERSHIP_FIELDS = "{ unrestrictedAccess subscriptions { active } }";
 /** The longest member id kept: far longer than Memberful's, which are numbers. */
 const MAX_SUBJECT_LENGTH = 255;
 
+/** How Ember talks to Memberful. */
+export const MEMBERFUL: ProviderApi = {
+  kind: "memberful",
+  name: "Memberful",
+  callbackPath: MEMBERFUL_CALLBACK_PATH,
+  webhookPath: MEMBERFUL_WEBHOOK_PATH,
+  signatureHeader: "X-Memberful-Webhook-Signature",
+  apiKeyName: "MEMBERFUL_API_KEY",
+  webhookSecretName: "MEMBERFUL_WEBHOOK_SECRET",
+  noMembershipError: null,
+  keysOf: memberfulKeysOf,
+  // Memberful sends the browser back to its custom app's OAuth redirect URL, so it isn't sent one.
+  authorizationOf,
+  memberWhoSignedIn,
+  membershipsOf,
+  subjectOf,
+};
+
 /**
  * The deployment's Memberful keys, or null without all three, or with a site that isn't an https
  * address, or an http one on this computer, where the browser tests fake one. The site is the address's
@@ -58,16 +107,16 @@ export function memberfulKeysOf(env: Env): MemberfulKeys | null {
   const [url, clientId, clientSecret] = [env.MEMBERFUL_URL?.trim(), env.MEMBERFUL_CLIENT_ID?.trim(), env.MEMBERFUL_CLIENT_SECRET?.trim()];
   if (!url || !clientId || !clientSecret) return null;
   const site = URL.parse(url);
-  if (site?.protocol === "https:" || (site?.protocol === "http:" && isLoopback(site))) return { site: site.origin, clientId, clientSecret };
+  if (site?.protocol === "https:" || (site?.protocol === "http:" && isLoopback(site))) return { site: site.origin, clientId, clientSecret, provider: MEMBERFUL };
   console.error("MEMBERFUL_URL must be a Memberful site's https address, such as https://example.memberful.com, so nobody signs in with Memberful");
   return null;
 }
 
-/** What asking the Memberful site's admin API takes, or null unless the deployment has its sign-in keys and `MEMBERFUL_API_KEY`. */
-export function memberfulApiOf(env: Env): MemberfulApi | null {
-  const keys = memberfulKeysOf(env);
-  const apiKey = env.MEMBERFUL_API_KEY?.trim();
-  return keys && apiKey ? { site: keys.site, apiKey } : null;
+/** Where to sign in at the Memberful site, which sends the browser back to the callback with `state`. */
+function authorizationOf({ site, clientId }: MemberfulKeys, state: string): string {
+  const authorize = new URL("/oauth", site);
+  authorize.search = new URLSearchParams({ response_type: "code", client_id: clientId, state }).toString();
+  return authorize.href;
 }
 
 /** Whether a subject is one Memberful could have given: a member id, which accounts here are linked by. */
@@ -136,10 +185,10 @@ export async function membershipsOf({ site, apiKey }: MemberfulApi, subjects: st
   }
 }
 
-/** Logs that Memberful's `endpoint` didn't answer as it should, with its status only, and answers null. */
-async function refused(endpoint: "token" | "member" | "admin", response: Response): Promise<null> {
+/** Logs that `by`'s `endpoint`, Memberful's unless it says, didn't answer as it should, with its status only, and answers null. */
+export async function refused(endpoint: string, response: Response, by = "Memberful"): Promise<null> {
   if (!response.bodyUsed) await response.body?.cancel();
-  console.error(`Memberful's ${endpoint} endpoint answered ${response.status}${response.ok ? " without what it should" : ""}`);
+  console.error(`${by}'s ${endpoint} endpoint answered ${response.status}${response.ok ? " without what it should" : ""}`);
   return null;
 }
 
@@ -200,15 +249,34 @@ export function namelessMember(free: (name: string) => boolean): string {
  * What someone new can be called here: `fullName`, then their email address's local part, cut to the
  * longest name, passing over either when it's blank or @ember's (`isReservedName`).
  */
-function namesOf(fullName: unknown, emailAddress: string | null): string[] {
+export function namesOf(fullName: unknown, emailAddress: string | null): string[] {
   const names = [typeof fullName === "string" ? fullName : "", emailAddress?.split("@")[0] ?? ""].map(cutName);
   return names.filter((name) => name && !isReservedName(name));
 }
 
 /** `name` without the spaces around it, cut to the longest name, without half of a character cut in two. */
-const cutName = (name: string) =>
+export const cutName = (name: string) =>
   name
     .trim()
     .slice(0, MAX_USER_NAME_LENGTH)
     .replace(/[\uD800-\uDBFF]$/, "")
     .trimEnd();
+
+/**
+ * The member a webhook's payload is about, by their member id, where Memberful's WordPress plugin finds
+ * it: `member.id` for a member's event, and the `member` of the subscription or order an event of theirs
+ * is about. Null for anything else, such as a plan's event, which says nothing about anyone's membership.
+ */
+function subjectOf(payload: unknown): string | null {
+  const { member, subscription, order } = (typeof payload === "object" && payload !== null ? payload : {}) as Record<string, unknown>;
+  const about = [member, (subscription as { member?: unknown } | null)?.member, (order as { member?: unknown } | null)?.member];
+  const id = about.map((someone) => (someone as { id?: unknown } | null)?.id).find((id) => id !== undefined && id !== null);
+  return subjectFrom(id);
+}
+
+/** A member id as a webhook's JSON gives it, a number or a string, as the string accounts are linked by, or null for neither. */
+export function subjectFrom(id: unknown): string | null {
+  // Memberful's ids are numbers in a webhook's JSON, and strings in its GraphQL API, as accounts are linked by them.
+  const subject = typeof id === "number" && Number.isSafeInteger(id) ? String(id) : id;
+  return isSubject(subject) ? subject : null;
+}

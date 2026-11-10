@@ -50,6 +50,8 @@ import {
   SIGN_UP_PATH,
   TRANSFER_PATH,
   TURNSTILE_CHECK_PATH,
+  WORDPRESS_CALLBACK_PATH,
+  WORDPRESS_WEBHOOK_PATH,
   workspacePageOf,
   type Account,
   type Bootstrap,
@@ -132,7 +134,7 @@ import { askForEmailLink, emailSignUpPage, invitationPage, join, joinCodeOf, joi
 import { checkResendApiKey } from "./mail";
 import { manifest, manifestFormatOf } from "./manifest";
 import { finishMemberfulSignIn, memberfulConnectionFor, memberfulRefusal, memberfulWebhook, memberfulWebhooksOf, startMemberfulSignIn } from "./memberful";
-import { memberfulKeysOf } from "./memberful-api";
+import { inProviderTerms, membershipKeysOf, membershipProviderOf } from "./membership-site";
 import { anyOtherPage, formAnswer } from "./pages";
 import { askForPasswordReset, passwordResetPage, resetPasswordWithCode } from "./password-resets";
 import { DUMMY_DIGEST, passwordHasher } from "./passwords";
@@ -215,7 +217,7 @@ async function signInWithPassword({ emailAddress, password, returnTo }: Record<s
   }
   if (user === "memberful") {
     const connecting = found && (await memberfulConnectionFor(request, env, found.userId, found.passwordDigest, returnTo));
-    return connecting ? connectionAnswer(connecting) : problem(403, MEMBERFUL_SIGN_IN_NEEDED);
+    return connecting ? connectionAnswer(connecting) : problem(403, inProviderTerms(env, MEMBERFUL_SIGN_IN_NEEDED));
   }
   if (!user) return problem(401, SIGN_IN_REJECTED);
   return json({ user }, { status: 201, headers: { "Set-Cookie": sessionCookie(request, token) } });
@@ -233,7 +235,7 @@ async function signInGuest(given: unknown, request: Request, env: Env): Promise<
 
   const token = newSessionToken();
   const user = await workspace(env).signInGuest(name, await tokenDigest(token, env.SESSION_SECRET), clientOf(request));
-  if (user === "memberful") return problem(403, MEMBERFUL_SIGN_IN_NEEDED);
+  if (user === "memberful") return problem(403, inProviderTerms(env, MEMBERFUL_SIGN_IN_NEEDED));
   if (user === "agent's name") return problem(422, agentsName(name));
   return json({ user }, { status: 201, headers: { "Set-Cookie": sessionCookie(request, token) } });
 }
@@ -245,7 +247,7 @@ async function signInGuest(given: unknown, request: Request, env: Env): Promise<
 async function bootstrap(request: Request, env: Env): Promise<Response> {
   const token = sessionToken(request);
   const [{ account, user, signInWithMemberful, passwordResetCodes, turnstileSiteKey }, push] = await Promise.all([
-    workspace(env).bootstrap(token ? await credentialsFor(token, request, env) : null, memberfulKeysOf(env)?.site ?? null, deployedAddressOf(request)),
+    workspace(env).bootstrap(token ? await credentialsFor(token, request, env) : null, membershipKeysOf(env)?.site ?? null, deployedAddressOf(request)),
     webPush(env),
   ]);
   const body: Bootstrap = {
@@ -254,6 +256,7 @@ async function bootstrap(request: Request, env: Env): Promise<Response> {
     setupPlaceholders: setupPlaceholdersOf(env),
     guestSignIn: guestSignIn(env) && !account?.memberfulSignIn,
     signInWithMemberful,
+    membershipProvider: membershipProviderOf(env),
     // The deployment's keys take the place of any an administrator gave.
     turnstileSiteKey: turnstileKeysOf(env)?.siteKey ?? turnstileSiteKey,
     passwordResetCodes,
@@ -290,7 +293,7 @@ async function workspaceSettings(request: Request, env: Env): Promise<Response> 
   if (!settings) return problem(401, "Not signed in");
   if (settings === "not set up") return problem(404, "Ember isn't set up yet");
   const deployment = {
-    memberfulSite: memberfulKeysOf(env)?.site ?? null,
+    memberfulSite: membershipKeysOf(env)?.site ?? null,
     memberfulWebhooks: memberfulWebhooksOf(env) !== null,
     turnstile: turnstileOf(env, settings.turnstile),
     cloudflareAccountId: settings.canAdminister ? deployedAccountIdOf(env) : null,
@@ -600,7 +603,7 @@ async function unbanPerson(request: Request, env: Env, userId: UserId): Promise<
  */
 async function profileAnswer({ transfer, profile, memberful }: YourProfile, env: Env): Promise<Response> {
   const transferId = await newTransferId(transfer, env.SESSION_SECRET, Date.now());
-  const answer = { ...profile, memberful: memberfulStatusOf(memberful, memberfulKeysOf(env)?.site ?? null) };
+  const answer = { ...profile, memberful: memberfulStatusOf(memberful, membershipKeysOf(env)?.site ?? null) };
   return json({ profile: answer, transferId } satisfies ProfileAnswer, { headers: { "Cache-Control": "no-store" } });
 }
 
@@ -671,24 +674,24 @@ async function changeProfile(request: Request, env: Env): Promise<Response> {
 async function connectMemberful(request: Request, env: Env): Promise<Response> {
   const credentials = await credentialsOf(request, env);
   if (!credentials) return problem(401, "Not signed in");
-  const site = memberfulKeysOf(env)?.site;
-  if (!site) return problem(403, MEMBERFUL_SIGN_IN_PROBLEMS.unavailable);
+  const site = membershipKeysOf(env)?.site;
+  if (!site) return problem(403, inProviderTerms(env, MEMBERFUL_SIGN_IN_PROBLEMS.unavailable));
   const body: unknown = await jsonBodyOf(request);
   const { currentPassword } = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
   const check = await workspace(env).memberfulConnectionCheck(credentials, request.headers.get("CF-Connecting-IP") ?? "unknown", site);
   if (!check) return problem(401, "Not signed in");
   if (check === "limited") return problem(429, SIGN_IN_LIMITED);
-  if (check === "unneeded") return problem(403, MEMBERFUL_SIGN_IN_PROBLEMS.unneeded);
-  if (check === "forbidden") return problem(403, "Guests can't connect Memberful");
-  if (check === "connected") return problem(409, "You've connected Memberful already");
+  if (check === "unneeded") return problem(403, inProviderTerms(env, MEMBERFUL_SIGN_IN_PROBLEMS.unneeded));
+  if (check === "forbidden") return problem(403, inProviderTerms(env, "Guests can't connect Memberful"));
+  if (check === "connected") return problem(409, inProviderTerms(env, "You've connected Memberful already"));
   if (check.passwordDigest !== "") {
-    if (typeof currentPassword !== "string" || !currentPassword) return problem(422, MEMBERFUL_PASSWORD_NEEDED);
+    if (typeof currentPassword !== "string" || !currentPassword) return problem(422, inProviderTerms(env, MEMBERFUL_PASSWORD_NEEDED));
     // One longer than the form takes is nobody's, as at sign-in.
     if (isPasswordTooLong(currentPassword) || !(await passwordHasher(env).verify(currentPassword, check.passwordDigest)).matches) return problem(422, CURRENT_PASSWORD_WRONG);
   }
   const connecting = await memberfulConnectionFor(request, env, check.userId, check.passwordDigest, PROFILE_PATH);
   // Something changed meanwhile: their password, the setting, or what they've connected.
-  return connecting ? connectionAnswer(connecting) : problem(409, "Connecting Memberful didn't start. Try again.");
+  return connecting ? connectionAnswer(connecting) : problem(409, inProviderTerms(env, "Connecting Memberful didn't start. Try again."));
 }
 
 /**
@@ -705,25 +708,25 @@ async function connectMemberful(request: Request, env: Env): Promise<Response> {
 async function disconnectMemberful(request: Request, env: Env): Promise<Response> {
   const credentials = await credentialsOf(request, env);
   if (!credentials) return problem(401, "Not signed in");
-  const site = memberfulKeysOf(env)?.site;
-  if (!site) return problem(403, MEMBERFUL_SIGN_IN_PROBLEMS.unavailable);
+  const site = membershipKeysOf(env)?.site;
+  if (!site) return problem(403, inProviderTerms(env, MEMBERFUL_SIGN_IN_PROBLEMS.unavailable));
   const disconnection = parseMemberfulDisconnection(await jsonBodyOf(request));
   if (typeof disconnection === "string") return problem(422, disconnection);
   const { currentPassword, pushSubscriptionEndpoint } = disconnection;
   const check = await workspace(env).memberfulDisconnectionCheck(credentials, request.headers.get("CF-Connecting-IP") ?? "unknown", site);
   if (!check) return problem(401, "Not signed in");
   if (check === "limited") return problem(429, SIGN_IN_LIMITED);
-  if (check === "forbidden") return problem(403, "Guests can't disconnect Memberful");
-  if (check === "not connected") return problem(404, MEMBERFUL_NOT_CONNECTED);
-  if (check === "no password") return problem(422, MEMBERFUL_DISCONNECT_WITHOUT_PASSWORD);
-  if (check === "no email address") return problem(422, MEMBERFUL_DISCONNECT_WITHOUT_EMAIL);
-  if (!currentPassword) return problem(422, MEMBERFUL_DISCONNECT_PASSWORD_NEEDED);
+  if (check === "forbidden") return problem(403, inProviderTerms(env, "Guests can't disconnect Memberful"));
+  if (check === "not connected") return problem(404, inProviderTerms(env, MEMBERFUL_NOT_CONNECTED));
+  if (check === "no password") return problem(422, inProviderTerms(env, MEMBERFUL_DISCONNECT_WITHOUT_PASSWORD));
+  if (check === "no email address") return problem(422, inProviderTerms(env, MEMBERFUL_DISCONNECT_WITHOUT_EMAIL));
+  if (!currentPassword) return problem(422, inProviderTerms(env, MEMBERFUL_DISCONNECT_PASSWORD_NEEDED));
   // One longer than the form takes is nobody's, as at sign-in.
   if (isPasswordTooLong(currentPassword) || !(await passwordHasher(env).verify(currentPassword, check.passwordDigest)).matches) return problem(422, CURRENT_PASSWORD_WRONG);
   const yours = await workspace(env).disconnectMemberful(credentials, site, check.passwordDigest, pushSubscriptionEndpoint || null);
   if (!yours) return problem(401, "Not signed in");
   // Something changed meanwhile: their password, or what they've connected.
-  if (yours === "refused") return problem(409, "Disconnecting Memberful didn't work. Try again.");
+  if (yours === "refused") return problem(409, inProviderTerms(env, "Disconnecting Memberful didn't work. Try again."));
   return profileAnswer(yours, env);
 }
 
@@ -1225,8 +1228,8 @@ async function route(request: Request, env: Env, pathname: string): Promise<Resp
   // A browser's report of what a page's policy blocked comes without the page's cookies or origin,
   // and from any browser the page reached.
   if (pathname === CSP_REPORT_PATH) return cspReport(request);
-  // Nor is Memberful's webhook, which its servers sign with the webhook's secret.
-  if (pathname === MEMBERFUL_WEBHOOK_PATH) return memberfulWebhook(request, env);
+  // Nor is the membership site's webhook, which its servers sign with the webhook's secret.
+  if (pathname === MEMBERFUL_WEBHOOK_PATH || pathname === WORDPRESS_WEBHOOK_PATH) return memberfulWebhook(request, env);
   const write = request.method !== "GET" && request.method !== "HEAD";
   // Nor are a room's files, to whoever has the address, whatever their browser.
   const file = fileAddressOf(pathname);
@@ -1242,7 +1245,7 @@ async function route(request: Request, env: Env, pathname: string): Promise<Resp
   if (pathname.startsWith("/api/")) return problem(404, "Not found");
   if (pathname === MEMBERFUL_SIGN_IN_PATH) return startMemberfulSignIn(request, env);
   // Signing in, which a banned IP address can't do, though it's a GET.
-  if (pathname === MEMBERFUL_CALLBACK_PATH) return (await isFromBannedAddress(request, env)) ? tooManyRequests() : finishMemberfulSignIn(request, env);
+  if (pathname === MEMBERFUL_CALLBACK_PATH || pathname === WORDPRESS_CALLBACK_PATH) return (await isFromBannedAddress(request, env)) ? tooManyRequests() : finishMemberfulSignIn(request, env);
   if (isSetupPath(pathname)) return setupPage(request, env);
   if (pathname === SIGN_UP_PATH) return signUpPage(request, env);
   if (pathname === INVITATION_PATH) return invitationPage(request, env);

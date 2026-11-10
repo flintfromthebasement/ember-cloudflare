@@ -33,6 +33,7 @@ import { jsonBodyOf } from "./bodies";
 import { originFor } from "./custom-domain";
 import type { Env } from "./env";
 import { emailLinkDigest, newEmailLink } from "./invitations";
+import { inProviderTerms } from "./membership-site";
 import { appPage, empty, formAnswer, home, signInFirst, signUpRefusal } from "./pages";
 import { passwordHasher } from "./passwords";
 import { passedTurnstile, turnstileKeysFor } from "./turnstile";
@@ -48,11 +49,11 @@ import type { NewPerson } from "./workspace-store";
 // are on, with the address it was sent to, and with a link someone asks Ember to email an address at the
 // workspace's email domains, while an administrator lets those domains in.
 
-/** What the join form answers while Memberful is members only: why, and where to go instead. */
-const MEMBERFUL_INSTEAD = {
-  error: MEMBERFUL_SIGN_IN_NEEDED,
+/** What the join form answers while Memberful is members only: why, in the terms of the deployment's membership site, and where to go instead. */
+const memberfulInstead = (env: Env) => ({
+  error: inProviderTerms(env, MEMBERFUL_SIGN_IN_NEEDED),
   redirect: "/session/new",
-};
+});
 
 /** What a form for joining answers while its way in is off: why, and the sign-in page, which says so. */
 const signInInsteadOf = (problem: JoiningProblem) => ({ error: JOINING_PROBLEMS[problem], redirect: signInSaying(problem) });
@@ -134,7 +135,7 @@ export async function join(request: Request, env: Env, code: string): Promise<Re
   const [session, link] = await Promise.all([authenticate(request, env), workspace(env).joinLink(code)]);
   if (session) return signedInAlready();
   if (link === "not found") return formAnswer({ error: "Not found" }, 404);
-  if (link === "memberful") return formAnswer(MEMBERFUL_INSTEAD, 403);
+  if (link === "memberful") return formAnswer(memberfulInstead(env), 403);
   if (link === "off") return formAnswer(signInInsteadOf("link_off"), 403);
 
   const sent = await userFormOf(request);
@@ -149,7 +150,7 @@ export async function join(request: Request, env: Env, code: string): Promise<Re
   const token = newSessionToken();
   const user = await workspace(env).join(code, person, await tokenDigest(token, env.SESSION_SECRET), clientOf(request));
   if (user === "not found") return formAnswer({ error: "Not found" }, 404);
-  if (user === "memberful") return formAnswer(MEMBERFUL_INSTEAD, 403);
+  if (user === "memberful") return formAnswer(memberfulInstead(env), 403);
   if (user === "off") return formAnswer(signInInsteadOf("link_off"), 403);
   if (user === "agent's name") return agentsNameRefused(form.name);
   if (!user) return emailAddressTaken(form.emailAddress);

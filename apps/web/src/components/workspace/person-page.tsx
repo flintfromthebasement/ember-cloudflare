@@ -3,6 +3,7 @@ import type { DirectoryUser, Me, Person, PersonAnswer, User, UserId } from "@emb
 import { ChatLines, EditPencil, Prohibition } from "@/components/icons/iconoir";
 import { PageLink } from "@/components/page-link";
 import { PeopleContext } from "@/hooks/use-directory";
+import { useMembershipProvider } from "@/hooks/use-membership-provider";
 import { useMounted } from "@/hooks/use-mounted";
 import { leave, PROFILE_PATH, useBackPath } from "@/hooks/use-route";
 import { useTitle } from "@/hooks/use-title";
@@ -55,6 +56,7 @@ const DIRECT_BUTTON =
  */
 export function PersonPage({ userId, me, onStartDirect, onPersonChanged, reloadPeople, onMissing, onFailed }: Props) {
   const [fetched, setFetched] = useState<PersonAnswer | null>(null);
+  const { name: provider } = useMembershipProvider();
   // As the people directory lists them now, kept current by the workspace socket, with what only the page is told.
   const listed = useContext(PeopleContext).get(userId);
   // As it lists them now, for answers that come later.
@@ -196,7 +198,7 @@ export function PersonPage({ userId, me, onStartDirect, onPersonChanged, reloadP
                   </>
                 )}
                 {person.status === "suspended" && (
-                  <div className="mt-4">{person.name}’s Memberful membership has lapsed, so they can’t sign in until it’s renewed.</div>
+                  <div className="mt-4">{person.name}’s {provider} membership has lapsed, so they can’t sign in until it’s renewed.</div>
                 )}
                 {me.administrator && !mine && (
                   <div className="mt-4">

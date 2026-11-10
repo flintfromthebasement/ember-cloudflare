@@ -7,6 +7,7 @@ const PENDING: Bootstrap = {
   setupPlaceholders: { name: "Kevin Rose", emailAddress: "kevin@kevinrose.com" },
   guestSignIn: true,
   signInWithMemberful: false,
+  membershipProvider: { kind: "memberful", name: "Memberful" },
   turnstileSiteKey: null,
   passwordResetCodes: false,
   account: { name: "Ember", tagline: "", hideTranslationButtons: true, customStyles: "", restrictRoomCreation: false, logo: null, customDomain: null, joinLink: true, openSignUp: false, memberfulJoin: false, memberfulSignIn: false, emailDomainSignUp: false, emailDomains: [], navigationIcons: {} },

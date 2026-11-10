@@ -16,10 +16,10 @@
 // would. A CI log can be public, as a public repository's Actions logs are, so there the deploy makes no
 // setup token, and says so, unless EMBER_SETUP_TOKEN in its environment brings one the deployer keeps as
 // a secret of their own. Workers Builds' log is the account's own, so it can carry the link. The keys of
-// a Memberful custom app, for its members to sign in (apps/worker/src/memberful.ts), and of a Turnstile
-// widget, for open sign-up's check, in place of any given in Set up Turnstile (apps/worker/src/turnstile.ts),
-// go up with every deploy whose environment gives them, as the Preview workflow's does from the
-// repository's secrets. So does the ID of the Cloudflare account the Worker goes to, as
+// a Memberful custom app, or a WordPress site's plugin, for its members to sign in
+// (apps/worker/src/memberful.ts), and of a Turnstile widget, for open sign-up's check, in place of any
+// given in Set up Turnstile (apps/worker/src/turnstile.ts), go up with every deploy whose environment
+// gives them, as the Preview workflow's does from the repository's secrets. So does the ID of the Cloudflare account the Worker goes to, as
 // CLOUDFLARE_ACCOUNT_ID, which a Worker can't learn by itself, for Set up Ember AI to fill in. Deploy
 // to Cloudflare's copy of Ember leaves out the .github folder, and with it the Update Ember workflow
 // that offers the copy Ember's releases, so a deploy without that workflow ends by saying how to add it.
@@ -92,7 +92,8 @@ const SETUP_TOKEN = /^[0-9a-f]{64}$/;
 const inPublicLog = () => !!process.env.CI && !process.env.WORKERS_CI;
 
 /**
- * The keys of a Memberful custom app, and the secret its site signs webhooks with, then a Turnstile
+ * The keys of a Memberful custom app, and the secret its site signs webhooks with, or a WordPress
+ * site's plugin's, with the site's name, then a Turnstile
  * widget's, and a Resend API key, which only the deployer can give.
  */
 const GIVEN_KEYS = [
@@ -101,6 +102,12 @@ const GIVEN_KEYS = [
   "MEMBERFUL_CLIENT_SECRET",
   "MEMBERFUL_API_KEY",
   "MEMBERFUL_WEBHOOK_SECRET",
+  "WORDPRESS_URL",
+  "WORDPRESS_CLIENT_ID",
+  "WORDPRESS_CLIENT_SECRET",
+  "WORDPRESS_API_KEY",
+  "WORDPRESS_WEBHOOK_SECRET",
+  "WORDPRESS_SITE_NAME",
   "TURNSTILE_SITE_KEY",
   "TURNSTILE_SECRET_KEY",
   "RESEND_API_KEY",

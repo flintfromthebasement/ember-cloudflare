@@ -30,6 +30,7 @@ const workspace: Omit<Bootstrap, "user"> = {
   setupPlaceholders: { name: "Kevin Rose", emailAddress: "kevin@kevinrose.com" },
   guestSignIn: false,
   signInWithMemberful: false,
+  membershipProvider: { kind: "memberful", name: "Memberful" },
   turnstileSiteKey: null,
   passwordResetCodes: false,
   account: {

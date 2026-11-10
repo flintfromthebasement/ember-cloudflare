@@ -15,6 +15,7 @@ account, as [Deploying](#deploying) describes.
   - [A custom domain](#a-custom-domain)
   - [Who can join](#who-can-join)
   - [Memberful sign-in](#memberful-sign-in)
+  - [WordPress sign-in](#wordpress-sign-in)
   - [Sending email](#sending-email)
   - [Inviting people by email](#inviting-people-by-email)
   - [Push notifications](#push-notifications)
@@ -395,6 +396,63 @@ membership, are never suspended. Administrators see suspended members dimmed in 
 where they can remove them, and everyone else sees them as removed. All of this goes on whether
 Memberful is on or not, since its members keep signing in with it once it's off.
 
+### WordPress sign-in
+
+The members of a WordPress site can sign in the same way, through a plugin on the site that speaks
+the protocol below, in place of a Memberful site: everything above, from Members only to connecting
+accounts and suspending lapsed members, works as it does for Memberful, and Ember's pages call the
+site `WORDPRESS_SITE_NAME`, or WordPress without it, wherever they'd say Memberful. A deployment has
+one membership site: once `WORDPRESS_URL` is set, it's the WordPress site, and the Memberful keys go
+unused. Accounts are linked by `WORDPRESS_URL`'s origin and the WordPress user's id, so keep the
+address once people have signed in, as with Memberful.
+
+1. Install and set up the plugin, giving it the redirect URL
+   `https://<Ember's address>/auth/wordpress/callback` and the webhook URL
+   `https://<Ember's address>/webhooks/wordpress`. It gives you a client id and secret, an API key
+   and a webhook secret.
+2. Give the Worker those as secrets, with the site's address and its name:
+
+   ```sh
+   pnpm exec wrangler secret put WORDPRESS_URL            # the site's origin, such as https://example.com
+   pnpm exec wrangler secret put WORDPRESS_CLIENT_ID
+   pnpm exec wrangler secret put WORDPRESS_CLIENT_SECRET
+   pnpm exec wrangler secret put WORDPRESS_API_KEY
+   pnpm exec wrangler secret put WORDPRESS_WEBHOOK_SECRET
+   pnpm exec wrangler secret put WORDPRESS_SITE_NAME      # optional: what Ember's pages call the site
+   ```
+
+   `pnpm run deploy` uploads them when its environment has them, as it does Memberful's keys.
+3. Turn it on in Workspace settings, under the site's name.
+
+The protocol is OAuth 2.0's authorization code flow and three JSON endpoints, all on the site's
+origin `B` (WordPress at the root, with pretty permalinks for `/wp-json/`). Ember sends no other
+credentials, and follows no redirect from the endpoints.
+
+1. **Authorize.** Ember sends the browser to
+   `B/?ember_authorize=1&response_type=code&client_id=…&redirect_uri=…&state=…`. The plugin has the
+   person sign in to WordPress if they haven't, then redirects to `redirect_uri` with `code`, good
+   once for ten minutes, and the same `state`. For someone without a membership that lets them chat,
+   it redirects with `error=access_denied` and `state` instead, which Ember shows as having no
+   active membership.
+2. **Token.** `POST B/wp-json/ember/v1/token`, form-encoded, with `grant_type=authorization_code`,
+   `code`, `client_id`, `client_secret` and `redirect_uri`, answers
+   `{"access_token": "…", "token_type": "Bearer", "expires_in": 600}`, or 400
+   `{"error": "invalid_grant"}`.
+3. **Member.** `GET B/wp-json/ember/v1/member` with `Authorization: Bearer <access_token>` answers
+   `{"id": "123", "email": "a@example.com", "full_name": "Ann Lee", "active": true}`: the WordPress
+   user's id as a string, and whether they have a membership that lets them chat. Other fields are
+   ignored.
+4. **Memberships.** `POST B/wp-json/ember/v1/memberships` with `Authorization: Bearer <API key>` and
+   `{"ids": ["123", "456"]}`, at most 100 ids, answers `{"members": {"123": true, "456": false}}`,
+   with false for an id it doesn't know. An answer that leaves out an id it was asked about is taken
+   as no answer, and asked again later.
+5. **Webhook.** When someone's membership changes, the plugin sends
+   `POST https://<Ember's address>/webhooks/wordpress` with
+   `{"event": "membership.changed", "member": {"id": "123"}}`, and in `X-Ember-Webhook-Signature`
+   the lowercase hex HMAC-SHA256 of the body under the webhook secret. As with Memberful, it only
+   says whom to ask about: Ember then asks the memberships endpoint. Ember answers 204, or 401 to a
+   signature that doesn't check out.
+
 ### Sending email
 
 Ember sends email with [Resend](https://resend.com), with an API key an administrator gives it, or
@@ -741,7 +799,7 @@ What a self-hoster should know, beyond keeping the setup password and link to th
   have, and while Memberful is on, add new ones. Administrators keep their passwords, so the site being down never locks
   them out. A webhook whose signature `MEMBERFUL_WEBHOOK_SECRET` doesn't check is refused, and even a
   signed one only has Ember ask Memberful's API about a member, so one forged or sent again changes
-  nothing.
+  nothing. A WordPress site's plugin vouches for its members likewise.
 - Custom CSS runs on every page for everyone, so it's an administrator's to write, like the rest of
   the workspace, and `EMBER_RECOVERY_TOKEN` can take over any account, so keep it set only while
   resetting a password, as above.

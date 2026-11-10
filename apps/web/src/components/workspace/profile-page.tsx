@@ -1,6 +1,7 @@
 import { useContext, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import {
   AVATAR_TOO_LARGE,
+  inTermsOf,
   MAX_AVATAR_SIZE,
   MAX_BIO_LENGTH,
   MAX_EMAIL_ADDRESS_LENGTH,
@@ -21,6 +22,7 @@ import { useFlash } from "@/components/flash";
 import { LogOut } from "@/components/icons/iconoir";
 import { Input } from "@/components/ui/input";
 import { PeopleContext } from "@/hooks/use-directory";
+import { useMembershipProvider } from "@/hooks/use-membership-provider";
 import { useMounted } from "@/hooks/use-mounted";
 import { usePush } from "@/hooks/use-push";
 import { leave, useBackPath } from "@/hooks/use-route";
@@ -112,6 +114,7 @@ function settled(typed: Fields, sent: Fields, saved: Fields): Fields {
  */
 export function ProfilePage({ me, rooms, askForRoom, onSignOut, onFailed }: Props) {
   const [fields, setFields] = useState<Fields | null>(null);
+  const { name: provider } = useMembershipProvider();
   /** The profile as the page last loaded or saved it. */
   const saved = useRef<Fields | null>(null);
   const [picture, setPicture] = useState<Picture | null>(null);
@@ -191,7 +194,7 @@ export function ProfilePage({ me, rooms, askForRoom, onSignOut, onFailed }: Prop
   function disconnected(answer: ProfileAnswer) {
     disconnectedMemberful.current = true;
     showAnswer(answer);
-    flash("notice", MEMBERFUL_DISCONNECTED_NOTICE);
+    flash("notice", inTermsOf(MEMBERFUL_DISCONNECTED_NOTICE, provider));
   }
 
   /** Saves `file` as your avatar, once a photo is picked. */
@@ -326,7 +329,7 @@ export function ProfilePage({ me, rooms, askForRoom, onSignOut, onFailed }: Prop
               {/* Someone who signed in with Memberful or just a name has no password. */}
               {fields && !hasPassword ? "Leave blank to keep signing in without a password." : "Leave blank to keep your current password."}
               {/* As the one it replaces connected it, while it's saved with an email address to sign in by. */}
-              {fields && hasPassword && memberful?.connected && fields.emailAddress.trim() !== "" && " A new one disconnects your Memberful account."}
+              {fields && hasPassword && memberful?.connected && fields.emailAddress.trim() !== "" && ` A new one disconnects your ${provider} account.`}
             </p>
           </Field>
           {hasPassword && (

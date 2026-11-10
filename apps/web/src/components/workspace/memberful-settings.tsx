@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { MEMBERFUL_CALLBACK_PATH, MEMBERFUL_WEBHOOK_PATH } from "@ember/protocol";
+import { MEMBERFUL_CALLBACK_PATH, MEMBERFUL_WEBHOOK_PATH, WORDPRESS_CALLBACK_PATH, WORDPRESS_WEBHOOK_PATH } from "@ember/protocol";
 import { Switch } from "@/components/ui/switch";
 import { useAccount } from "@/hooks/use-account";
+import { useMembershipProvider } from "@/hooks/use-membership-provider";
 import { cn } from "@/lib/utils";
 import { WORKERS_DASHBOARD } from "./custom-domain-settings";
 
@@ -11,7 +12,8 @@ import { WORKERS_DASHBOARD } from "./custom-domain-settings";
 // (2026-10-26): turning it on before the deployment has the keys shows how to make and set them, saving
 // nothing, and once it's on, how to have Memberful's webhooks say when a membership lapses, with Members
 // only, which keeps everyone else out. Laid out as the other ways to join are, with Members only's
-// switch inside it.
+// switch inside it. A deployment whose members sign in with a WordPress site instead shows the card by
+// the site's name, with the steps its plugin takes.
 
 const NOTE = "text-[0.8em] text-muted-foreground max-md:text-[12px]";
 
@@ -52,6 +54,8 @@ export function MemberfulSettings({
   setAside = null,
 }: Props) {
   const { customDomain } = useAccount();
+  const { kind, name } = useMembershipProvider();
+  const wordpress = kind === "wordpress";
   const [settingUp, setSettingUp] = useState(false);
   // Turned on before the deployment has the keys, which shows the steps to get them and saves nothing, as the server would refuse it.
   const askingForKeys = settingUp && site === null && setAside === null;
@@ -64,28 +68,30 @@ export function MemberfulSettings({
   };
   // Where Memberful sends people back to, and its webhooks: Ember's address, wherever settings are opened.
   const origin = `${location.protocol}//${customDomain ?? location.host}`;
-  const redirectUrl = `${origin}${MEMBERFUL_CALLBACK_PATH}`;
-  const webhookUrl = `${origin}${MEMBERFUL_WEBHOOK_PATH}`;
+  const redirectUrl = `${origin}${wordpress ? WORDPRESS_CALLBACK_PATH : MEMBERFUL_CALLBACK_PATH}`;
+  const webhookUrl = `${origin}${wordpress ? WORDPRESS_WEBHOOK_PATH : MEMBERFUL_WEBHOOK_PATH}`;
+  // What its custom app, or the WordPress site's plugin, calls the address it sends people back to.
+  const redirectNamed = wordpress ? "the redirect URL its plugin is given" : "the OAuth redirect URL of its custom app";
 
   return (
     <section aria-labelledby="memberful-heading" className="flex flex-col gap-3 rounded-[10px] border bg-surface px-[2ch] py-4 text-start max-md:px-3">
       <div className="flex items-center gap-x-[1ch] gap-y-4">
         <div className="min-w-0 flex-1">
           <h3 id="memberful-heading" className={cn("text-base font-semibold", setAside !== null && "text-muted-foreground")}>
-            Memberful
+            {name}
           </h3>
           <p id="memberful-description" className={cn(NOTE, site === null && checked && "text-negative")}>
             {site === null && checked ? (
-              "It's on, but this deployment no longer has its Memberful keys, so nobody can sign in with Memberful."
+              `It's on, but this deployment no longer has its ${name} keys, so nobody can sign in with ${name}.`
             ) : setAside !== null ? (
               setAside
             ) : askingForKeys ? (
-              "Memberful can't be turned on until this deployment has your Memberful site's keys. These steps give it them."
+              `${name} can't be turned on until this deployment has your ${wordpress ? "WordPress" : "Memberful"} site's keys. These steps give it them.`
             ) : site === null ? (
-              "Members of a Memberful site join and sign in with their Memberful account."
+              `Members of a ${wordpress ? "WordPress" : "Memberful"} site join and sign in with their ${name} account.`
             ) : (
               <>
-                Members of <strong className="wrap-anywhere">{site}</strong> join and sign in with their Memberful account. Turned off, it lets nobody new
+                Members of <strong className="wrap-anywhere">{site}</strong> join and sign in with their {name} account. Turned off, it lets nobody new
                 join, but those who did keep signing in with it.
                 {webhooks && " A member whose membership lapses is signed out until it's renewed."}
               </>
@@ -105,8 +111,8 @@ export function MemberfulSettings({
           <div className="min-w-0 flex-1">
             <div id="members-only-heading">Members only</div>
             <p id="members-only-description" className={NOTE}>
-              Nobody else can join but the people you invite, and only they and administrators sign in with a password. Members who have one connect their
-              Memberful account as they next sign in.
+              Nobody else can join but the people you invite, and only they and administrators sign in with a password. Members who have one connect their{" "}
+              {name} account as they next sign in.
             </p>
           </div>
           <Switch
@@ -119,19 +125,23 @@ export function MemberfulSettings({
         </div>
       )}
       {!shown ? null : site === null ? (
-        <Steps redirectUrl={redirectUrl} webhookUrl={webhookUrl} />
+        wordpress ? (
+          <WordPressSteps redirectUrl={redirectUrl} webhookUrl={webhookUrl} />
+        ) : (
+          <Steps redirectUrl={redirectUrl} webhookUrl={webhookUrl} />
+        )
       ) : (
         <>
-          {!webhooks && <WebhookSteps webhookUrl={webhookUrl} />}
+          {!webhooks && <WebhookSteps webhookUrl={webhookUrl} wordpress={wordpress} name={name} />}
           <p className={NOTE}>
             {webhooks ? (
               <>
-                Memberful sends people back to <span className="wrap-anywhere">{redirectUrl}</span>, the OAuth redirect URL of its custom app, and its webhook
+                {name} sends people back to <span className="wrap-anywhere">{redirectUrl}</span>, {redirectNamed}, and its webhook
                 to <span className="wrap-anywhere">{webhookUrl}</span>. If Ember's address changes, change both there too.
               </>
             ) : (
               <>
-                Memberful sends people back to <span className="wrap-anywhere">{redirectUrl}</span>, the OAuth redirect URL of its custom app. If Ember's
+                {name} sends people back to <span className="wrap-anywhere">{redirectUrl}</span>, {redirectNamed}. If Ember's
                 address changes, change it there too.
               </>
             )}
@@ -180,16 +190,14 @@ function Steps({ redirectUrl, webhookUrl }: { redirectUrl: string; webhookUrl: s
 }
 
 /** The steps to hear Memberful's webhooks, once members can sign in, until the deployment has what it takes. */
-function WebhookSteps({ webhookUrl }: { webhookUrl: string }) {
+function WebhookSteps({ webhookUrl, wordpress, name }: { webhookUrl: string; wordpress: boolean; name: string }) {
   return (
     <>
-      <p>A member whose membership lapses can't sign in again, but stays signed in where they are until Ember hears Memberful's webhooks.</p>
+      <p>A member whose membership lapses can't sign in again, but stays signed in where they are until Ember hears {name}'s webhooks.</p>
       <ol aria-label="Steps to sign out members whose membership lapses" className="flex list-decimal flex-col gap-2 ps-5">
+        <li>{wordpress ? <AddWordPressWebhook webhookUrl={webhookUrl} /> : <AddWebhook webhookUrl={webhookUrl} />}</li>
         <li>
-          <AddWebhook webhookUrl={webhookUrl} />
-        </li>
-        <li>
-          Give this Worker two more secrets: <WebhookSecrets />. <DashboardLink />
+          Give this Worker two more secrets: {wordpress ? <WordPressWebhookSecrets /> : <WebhookSecrets />}. <DashboardLink />
         </li>
       </ol>
     </>
@@ -211,6 +219,53 @@ function WebhookSecrets() {
   return (
     <>
       the webhook's secret key as <code>MEMBERFUL_WEBHOOK_SECRET</code>, and the custom app's API key as <code>MEMBERFUL_API_KEY</code>
+    </>
+  );
+}
+
+/**
+ * The steps to let a WordPress site's members sign in: a plugin that speaks Ember's sign-in, given the
+ * redirect URL, then its keys as the Worker's secrets, and its webhook with the two secrets that hearing
+ * it takes.
+ */
+function WordPressSteps({ redirectUrl, webhookUrl }: { redirectUrl: string; webhookUrl: string }) {
+  return (
+    <ol aria-label="Steps to let WordPress members sign in" className="flex list-decimal flex-col gap-2 ps-5">
+      <li>
+        In WordPress, install a plugin that speaks Ember's sign-in, as Ember's self-hosting guide describes, and give it the redirect URL{" "}
+        <strong className="wrap-anywhere">{redirectUrl}</strong>.
+      </li>
+      <li>
+        Give this Worker three secrets: <code>WORDPRESS_URL</code>, your site's address, such as https://example.com, and the plugin's client id and client
+        secret as <code>WORDPRESS_CLIENT_ID</code> and <code>WORDPRESS_CLIENT_SECRET</code>, with <code>wrangler secret put</code>, or as the type{" "}
+        <em>Secret</em> under <em>Settings</em>, <em>Variables and Secrets</em> in the Cloudflare dashboard, since a deploy takes away plain text ones.{" "}
+        <code>WORDPRESS_SITE_NAME</code> names the site on Ember's pages. <DashboardLink />
+      </li>
+      <li>
+        So that a member whose membership lapses is signed out, not only kept from signing in again: <AddWordPressWebhook webhookUrl={webhookUrl} /> Then give
+        this Worker two more secrets: <WordPressWebhookSecrets />.
+      </li>
+      <li>
+        Reload this page, and turn this on again.
+      </li>
+    </ol>
+  );
+}
+
+/** Pointing the plugin's webhook at Ember, which says whose membership changed. */
+function AddWordPressWebhook({ webhookUrl }: { webhookUrl: string }) {
+  return (
+    <>
+      In the plugin's settings, send its webhook to <strong className="wrap-anywhere">{webhookUrl}</strong>.
+    </>
+  );
+}
+
+/** The two secrets that hearing the plugin's webhook takes: its own, to check it came from the site, and the API key, to check what it says. */
+function WordPressWebhookSecrets() {
+  return (
+    <>
+      the webhook's secret as <code>WORDPRESS_WEBHOOK_SECRET</code>, and the plugin's API key as <code>WORDPRESS_API_KEY</code>
     </>
   );
 }

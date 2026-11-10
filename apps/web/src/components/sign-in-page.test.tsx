@@ -10,7 +10,9 @@ import {
 } from "@ember/protocol";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { MembershipProviderContext } from "@/hooks/use-membership-provider";
 import { returnPath } from "@/lib/return-path";
 import { CHROME_MAC } from "@/test-platforms";
 import { FlashProvider } from "./flash";
@@ -23,6 +25,7 @@ const workspace: Omit<Bootstrap, "user"> = {
   setupPlaceholders: { name: "Kevin Rose", emailAddress: "kevin@kevinrose.com" },
   guestSignIn: false,
   signInWithMemberful: false,
+  membershipProvider: { kind: "memberful", name: "Memberful" },
   turnstileSiteKey: null,
   passwordResetCodes: false,
   account: { name: "Ember", tagline: "", hideTranslationButtons: true, customStyles: "", restrictRoomCreation: false, logo: null, customDomain: null, joinLink: true, openSignUp: false, memberfulJoin: false, memberfulSignIn: false, emailDomainSignUp: false, emailDomains: [], navigationIcons: {} },
@@ -309,6 +312,18 @@ describe("Sign in with Memberful", () => {
     render(<SignInPage workspace={{ ...workspace, signInWithMemberful: true }} onSignedIn={vi.fn()} />, { wrapper: FlashProvider });
     expect(screen.getByLabelText("Email address")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Sign in with Memberful" })).toHaveAttribute("href", "/auth/memberful");
+  });
+
+  it("names the deployment's WordPress site in Memberful's place, and its problems", () => {
+    history.replaceState(null, "", "/session/new?memberful=membership");
+    const wordpress = ({ children }: { children: ReactNode }) => (
+      <MembershipProviderContext value={{ kind: "wordpress", name: "Example Club" }}>
+        <FlashProvider>{children}</FlashProvider>
+      </MembershipProviderContext>
+    );
+    render(<SignInPage workspace={{ ...workspace, signInWithMemberful: true }} onSignedIn={vi.fn()} />, { wrapper: wordpress });
+    expect(screen.getByRole("link", { name: "Sign in with Example Club" })).toHaveAttribute("href", "/auth/memberful");
+    expect(screen.getByText("Your Example Club account has no active membership.")).toBeInTheDocument();
   });
 
   it("asks only for a password while nobody here signs in with Memberful", () => {

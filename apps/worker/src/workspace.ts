@@ -97,7 +97,8 @@ import { pictureObjects, type StoredPicture } from "./files/pictures";
 import type { SfuApp } from "./huddles/sfu";
 import { alphanumeric, sortableId } from "./ids";
 import { sendEmail, sendEmails, senderOf, type Sender } from "./mail";
-import { memberfulApiOf, membershipsOf, namelessMember, type MemberfulMember } from "./memberful-api";
+import { namelessMember, type MemberfulMember } from "./memberful-api";
+import { membershipApiOf } from "./membership-site";
 import { webPush } from "./push/keys";
 import { FixedWindowLimit } from "./rate-limit";
 import { sessionTag } from "./revocations";
@@ -2094,7 +2095,7 @@ export class Workspace extends DurableObject<Env> {
    * account there, since the check isn't kept while nobody is.
    */
   private async keepCatchingUp(dueAt: number): Promise<void> {
-    const api = memberfulApiOf(this.env);
+    const api = membershipApiOf(this.env);
     if (!api) return;
     await this.store.scheduleMembershipCatchUp(api.site, dueAt);
     await this.wakeAt(dueAt);
@@ -3615,14 +3616,14 @@ export class Workspace extends DurableObject<Env> {
    * and whatever was queued is forgotten.
    */
   private async checkMemberships(): Promise<void> {
-    const api = memberfulApiOf(this.env);
+    const api = membershipApiOf(this.env);
     const now = Date.now();
     const due = await this.store.dueMembershipChecks(api?.site ?? null, now, now + MEMBERSHIP_CATCH_UP_MS, MEMBERSHIPS_PER_CHECK);
     if (!api || due.length === 0) return;
     const checks = due[0]!.attempts > 0 ? due.slice(0, 1) : due.filter(({ attempts }) => attempts === 0);
     const subjects = checks.map(({ subject }) => subject);
     const readAt = Date.now();
-    const memberships = await membershipsOf(api, subjects);
+    const memberships = await api.provider.membershipsOf(api, subjects);
     if (memberships) await this.oneAtATime(() => this.applyMemberships(api.site, memberships, readAt));
     await this.store.settleMembershipChecks(api.site, subjects, memberships ? readAt : null, Date.now());
   }
@@ -3761,7 +3762,7 @@ export class Workspace extends DurableObject<Env> {
    * key.
    */
   private async resumeDeliveries(): Promise<void> {
-    const api = memberfulApiOf(this.env);
+    const api = membershipApiOf(this.env);
     if (api) await this.store.startMembershipCatchUp(api.site, Date.now());
     await this.scheduleDelivery();
   }

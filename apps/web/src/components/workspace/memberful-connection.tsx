@@ -3,6 +3,7 @@ import { MAX_PASSWORD_LENGTH, type MemberfulAccount, type ProfileAnswer } from "
 import { AUTH_FORM } from "@/components/auth-page";
 import { FIELD_INPUT, Field, SubmitButton } from "@/components/field";
 import { Input } from "@/components/ui/input";
+import { useMembershipProvider } from "@/hooks/use-membership-provider";
 import { useMounted } from "@/hooks/use-mounted";
 import { connectMemberful, disconnectMemberful, isSignedOut } from "@/lib/api";
 import { openPage } from "@/lib/page";
@@ -45,6 +46,7 @@ function describe({ name, emailAddress }: MemberfulAccount): string | null {
  */
 export function MemberfulConnection({ connected, membersOnly, hasPassword, hasEmailAddress, membershipNeeded, onDisconnected, onFailed }: Props) {
   const [busy, setBusy] = useState(false);
+  const { name: provider } = useMembershipProvider();
   const passwordInput = useRef<HTMLInputElement>(null);
   const mounted = useMounted();
 
@@ -117,12 +119,12 @@ export function MemberfulConnection({ connected, membersOnly, hasPassword, hasEm
   return (
     <section aria-labelledby="memberful-connection-heading" className="flex flex-col gap-3 rounded-[10px] border bg-surface px-[2ch] py-4 max-md:px-3">
       <h2 id="memberful-connection-heading" className="text-base font-semibold">
-        Memberful
+        {provider}
       </h2>
       {connected ? (
         <>
           <p>
-            {who ? `Connected to Memberful as ${who}` : "Your Memberful account is connected"}
+            {who ? `Connected to ${provider} as ${who}` : `Your ${provider} account is connected`}
             {signsYouIn ? ", so you sign in with it." : ", so you can sign in with it too."}
           </p>
           {signsInWithPassword ? (
@@ -133,7 +135,7 @@ export function MemberfulConnection({ connected, membersOnly, hasPassword, hasEm
                   : "Disconnecting ends your other sessions, as a new password does."}
               </p>
               {passwordField("memberful-disconnection-help")}
-              <SubmitButton disabled={busy}>Disconnect Memberful</SubmitButton>
+              <SubmitButton disabled={busy}>Disconnect {provider}</SubmitButton>
             </form>
           ) : hasPassword ? (
             <p>Add your email address above to disconnect it, so that you can still sign in with your password.</p>
@@ -144,11 +146,11 @@ export function MemberfulConnection({ connected, membersOnly, hasPassword, hasEm
       ) : (
         <form onSubmit={connect} className={AUTH_FORM}>
           <p id="memberful-connection-help">
-            Members sign in with Memberful.{" "}
-            {membershipNeeded ? "Connect your Memberful account to keep signing in as yourself." : "Connect your Memberful account to sign in with it too."}
+            Members sign in with {provider}.{" "}
+            {membershipNeeded ? `Connect your ${provider} account to keep signing in as yourself.` : `Connect your ${provider} account to sign in with it too.`}
           </p>
           {hasPassword && passwordField("memberful-connection-help")}
-          <SubmitButton disabled={busy}>Connect Memberful</SubmitButton>
+          <SubmitButton disabled={busy}>Connect {provider}</SubmitButton>
         </form>
       )}
     </section>
