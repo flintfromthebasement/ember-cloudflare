@@ -235,6 +235,10 @@ interface Props {
    * thread, without Also send to the room.
    */
   posts?: boolean;
+  /** What it says while nothing's written, in place of the one it picks for its room or thread. */
+  placeholder?: string;
+  /** Whether it takes files, as every composer does but a reply to a comment's. */
+  files?: boolean;
   /** Sends a message, its body markup, answering whether it went: one that didn't stays to be changed. */
   onSend: (body: string, alsoSend: boolean) => boolean;
   /** Sends files, each as a message of its own, before the message written with them. */
@@ -261,7 +265,7 @@ export interface ComposerHandle {
  * Files picked, pasted or dropped wait above the card to go with the next message. What's written is
  * kept as a draft until it's sent. A thread's has Also send to the room before Send.
  */
-export function Composer({ roomId, roomName, direct = false, userId, typing, disabled, deferEditor = false, threadId, posts = false, onSend, onSendFiles, onTyping, onEditLastMessage, autoFocus = true, ref }: Props) {
+export function Composer({ roomId, roomName, direct = false, userId, typing, disabled, deferEditor = false, threadId, posts = false, placeholder: givenPlaceholder, files = true, onSend, onSendFiles, onTyping, onEditLastMessage, autoFocus = true, ref }: Props) {
   const editor = useRef<RichTextEditorHandle>(null);
   const form = useRef<HTMLFormElement>(null);
   const [toolbarOpen, setToolbarOpen] = useState(false);
@@ -282,7 +286,7 @@ export function Composer({ roomId, roomName, direct = false, userId, typing, dis
   const wasBlank = useRef(!draft);
   // Whether Quote wrote what the editor opens with, before it showed, so it takes focus as Quote has it do.
   const replied = useRef(false);
-  const placeholder = threadId !== undefined ? "Reply…" : posts ? `Start a post in #${roomName}` : `Message ${direct ? "" : "#"}${roomName}`;
+  const placeholder = givenPlaceholder ?? (threadId !== undefined ? "Reply…" : posts ? `Start a post in #${roomName}` : `Message ${direct ? "" : "#"}${roomName}`);
 
   // What's written changed, to `body`, or to nothing: the room hears whether you're typing, and it's kept.
   const wrote = (body: string | null) => {
@@ -401,9 +405,9 @@ export function Composer({ roomId, roomName, direct = false, userId, typing, dis
         // what was said about files too large.
         onPaste={(event) => {
           if (event.clipboardData.files.length > 0) event.preventDefault();
-          picked.add(event.clipboardData.files);
+          if (files) picked.add(event.clipboardData.files);
         }}
-        {...dropTarget(picked.add)}
+        {...(files && dropTarget(picked.add))}
       >
         <TypingIndicator typists={typing} />
         {/* The files picked, and those too large to send. */}
@@ -444,6 +448,7 @@ export function Composer({ roomId, roomName, direct = false, userId, typing, dis
           <div className="flex flex-none items-center gap-0.5">
             {/* Campfire's `.input--file` (inputs.css): the file field fills the button, unseen, so pressing it
                 anywhere opens the browser's file picker, and the button shows when the field has focus. */}
+            {files && (
             <label
               title="Attach files"
               className={cn(
@@ -466,6 +471,7 @@ export function Composer({ roomId, roomName, direct = false, userId, typing, dis
               />
               <span className="sr-only">Attach a file</span>
             </label>
+            )}
             <button
               type="button"
               disabled={disabled}

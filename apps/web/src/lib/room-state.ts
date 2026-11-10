@@ -481,6 +481,9 @@ function applyFrame(state: RoomState, frame: ServerFrame, now: number): RoomStat
     case "thread.opened":
     case "thread.history":
     case "posts":
+    case "post":
+    case "comments":
+    case "replies":
     case "pong":
       return state;
   }

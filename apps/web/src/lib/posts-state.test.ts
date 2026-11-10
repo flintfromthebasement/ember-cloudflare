@@ -36,19 +36,23 @@ describe("postsReducer", () => {
     expect(ids(postsReducer(older, { type: "frame", frame: { type: "posts", before: null, posts: [post("p4")], hasMore: true } }))).toEqual(["p4"]);
   });
 
-  it("puts a new post on top, and brings a post to the top with a reply, keeping its newest replies", () => {
+  it("puts a new post on top, and moves a post up with a reply only once the reader asks", () => {
     // Ids sort by when they were made, as the room's do.
     let state = loaded([post("02"), post("01", ["03", "04"])].sort((a, b) => (a.activeId < b.activeId ? 1 : -1)));
     expect(ids(state)).toEqual(["01", "02"]);
     state = postsReducer(state, { type: "frame", frame: { type: "message.created", message: message("05"), seq: 1 } });
     expect(ids(state)).toEqual(["05", "01", "02"]);
     state = postsReducer(state, { type: "frame", frame: { type: "message.created", message: message("06", "02"), seq: 2 } });
+    expect(ids(state)).toEqual(["05", "01", "02"]);
+    expect(state.moved).toBe(true);
+    expect(state.posts[2]!.replies.map((r) => r.id)).toEqual(["06"]);
+    expect(state.posts[2]!.activeId).toBe("06");
+    state = postsReducer(state, { type: "reorder" });
     expect(ids(state)).toEqual(["02", "05", "01"]);
-    expect(state.posts[0]!.replies.map((r) => r.id)).toEqual(["06"]);
-    expect(state.posts[0]!.activeId).toBe("06");
-    state = postsReducer(state, { type: "frame", frame: { type: "message.created", message: message("07", "01"), seq: 3 } });
-    expect(ids(state)).toEqual(["01", "02", "05"]);
-    expect(state.posts[0]!.replies.map((r) => r.id)).toEqual(["04", "07"]);
+    expect(state.moved).toBe(false);
+    // A reply to a comment leaves the post's newest comments as they are.
+    state = postsReducer(state, { type: "frame", frame: { type: "message.created", message: { ...message("07", "01"), replyToId: "04" }, seq: 3 } });
+    expect(state.posts.find((p) => p.message.id === "01")!.replies.map((r) => r.id)).toEqual(["03", "04"]);
   });
 
   it("asks again when a reply comes to a post it doesn't have", () => {

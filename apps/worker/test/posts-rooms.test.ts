@@ -1,6 +1,6 @@
-import { POST_REPLIES_SHOWN, type Message, type RoomId, type RoomSettings, type SharedRoom, type Sidebar } from "@ember/protocol";
+import { COMMENT_REPLIES_PAGE_SIZE, POST_REPLIES_SHOWN, type Message, type RoomId, type RoomSettings, type SharedRoom, type Sidebar } from "@ember/protocol";
 import { beforeEach, describe, expect, it } from "vitest";
-import { api, connect, createRoom, freshDeploy, freshRoom, post, signIn, workspaceSql, type Session, type Socket } from "./support";
+import { api, connect, createRoom, freshDeploy, freshRoom, post, post as post_, signIn, workspaceSql, type Session, type Socket } from "./support";
 
 // Posts rooms, as a community's forum has them: every message is a post, answered in its thread, and the
 // room lists its posts newest activity first, each with its newest replies.
@@ -27,6 +27,24 @@ async function reply(client: Socket, parent: Pick<Message, "id">, body: string):
   for (;;) {
     const { message } = await client.next("message.created");
     if (message.clientMessageId === clientMessageId) return message;
+  }
+}
+
+/** Replies to comment `replyToId` in `parent`'s thread as `client`, and waits for the room to confirm it. */
+async function answer(client: Socket, parent: Pick<Message, "id">, replyToId: string, body: string): Promise<Message> {
+  const clientMessageId = crypto.randomUUID();
+  client.send({ type: "message.create", clientMessageId, body, parentId: parent.id, replyToId });
+  for (;;) {
+    const { message } = await client.next("message.created");
+    if (message.clientMessageId === clientMessageId) return message;
+  }
+}
+
+/** The next change `client` hears to message `id`. */
+async function updated(client: Socket, id: string): Promise<Message> {
+  for (;;) {
+    const { message } = await client.next("message.updated");
+    if (message.id === id) return message;
   }
 }
 
@@ -125,5 +143,90 @@ describe("Posts rooms", () => {
   it("answers an empty room with no posts", async () => {
     const ada = await connect(await freshRoom("posts-empty"), "Ada");
     expect(await postsOf(ada)).toEqual({ type: "posts", before: null, posts: [], hasMore: false });
+  });
+});
+
+describe("Comments and their replies", () => {
+  it("replies to a comment under it, and to a reply beside it, two levels and no deeper, counting them", async () => {
+    const room = await freshRoom("comment-replies");
+    const [ada, grace] = [await connect(room, "Ada"), await connect(room, "Grace")];
+    const post = await post_(ada, "<p>Who has the best pizza?</p>");
+    const comment = await reply(grace, post, "<p>New York</p>");
+    const first = await answer(ada, post, comment.id, "<p>Why?</p>");
+    expect(first).toMatchObject({ parentId: post.id, replyToId: comment.id });
+    expect((await updated(ada, comment.id)).replyCount).toBe(1);
+    // A reply to that reply stacks under the same comment.
+    const second = await answer(grace, post, first.id, "<p>Because</p>");
+    expect(second.replyToId).toBe(comment.id);
+    expect((await updated(ada, comment.id)).replyCount).toBe(2);
+
+    const { posts } = await postsOf(ada);
+    // The post's preview shows its comments, not the replies to them, and its thread counts every reply.
+    expect(posts[0]!.replies.map(({ id }) => id)).toEqual([comment.id]);
+    expect(posts[0]!.replies[0]!.replyCount).toBe(2);
+    expect(posts[0]!.message.thread?.count).toBe(3);
+    expect(posts[0]!.activeId).toBe(second.id);
+
+    ada.send({ type: "replies.after", commentId: comment.id });
+    expect(await ada.next("replies")).toMatchObject({ commentId: comment.id, after: null, hasMore: false, replies: [{ id: first.id }, { id: second.id }] });
+  });
+
+  it("pages a post's comments newest first and a comment's replies oldest first", async () => {
+    const room = await freshRoom("comment-pages");
+    const ada = await connect(room, "Ada");
+    const post = await post_(ada, "<p>Toppings?</p>");
+    const comments = [];
+    for (let i = 0; i < 4; i++) comments.push(await reply(ada, post, `<p>Comment ${i}</p>`));
+    const replies = [];
+    for (let i = 0; i < COMMENT_REPLIES_PAGE_SIZE + 1; i++) replies.push(await answer(ada, post, comments[0]!.id, `<p>Reply ${i}</p>`));
+
+    ada.send({ type: "comments.before", parentId: post.id, limit: 3 });
+    const newest = await ada.next("comments");
+    expect(newest.comments.map(({ id }) => id)).toEqual([comments[3]!.id, comments[2]!.id, comments[1]!.id]);
+    expect(newest.hasMore).toBe(true);
+    ada.send({ type: "comments.before", parentId: post.id, before: comments[1]!.id, limit: 3 });
+    expect(await ada.next("comments")).toMatchObject({ before: comments[1]!.id, hasMore: false, comments: [{ id: comments[0]!.id, replyCount: COMMENT_REPLIES_PAGE_SIZE + 1 }] });
+
+    ada.send({ type: "replies.after", commentId: comments[0]!.id });
+    const oldest = await ada.next("replies");
+    expect(oldest.replies.map(({ id }) => id)).toEqual(replies.slice(0, COMMENT_REPLIES_PAGE_SIZE).map(({ id }) => id));
+    expect(oldest.hasMore).toBe(true);
+    ada.send({ type: "replies.after", commentId: comments[0]!.id, after: oldest.replies.at(-1)!.id });
+    expect((await ada.next("replies")).replies.map(({ id }) => id)).toEqual([replies.at(-1)!.id]);
+  });
+
+  it("deletes a comment's replies with it, and counts a comment's replies again as one goes", async () => {
+    const room = await freshRoom("comment-deletes");
+    const ada = await connect(room, "Ada");
+    const post = await post_(ada, "<p>Crust</p>");
+    const [kept, doomed] = [await reply(ada, post, "<p>Thin</p>"), await reply(ada, post, "<p>Thick</p>")];
+    const [a, b] = [await answer(ada, post, kept.id, "<p>Yes</p>"), await answer(ada, post, kept.id, "<p>No</p>")];
+    const orphan = await answer(ada, post, doomed.id, "<p>Maybe</p>");
+
+    ada.send({ type: "message.delete", messageId: a.id });
+    expect(await ada.next("message.deleted")).toMatchObject({ messageId: a.id });
+    expect((await updated(ada, kept.id)).replyCount).toBe(1);
+
+    ada.send({ type: "message.delete", messageId: doomed.id });
+    const gone = [(await ada.next("message.deleted")).messageId, (await ada.next("message.deleted")).messageId];
+    expect(gone.sort()).toEqual([doomed.id, orphan.id].sort());
+    ada.send({ type: "comments.before", parentId: post.id });
+    expect((await ada.next("comments")).comments.map(({ id }) => id)).toEqual([kept.id]);
+    ada.send({ type: "replies.after", commentId: kept.id });
+    expect((await ada.next("replies")).replies.map(({ id }) => id)).toEqual([b.id]);
+  });
+
+  it("refuses a reply to a comment in another thread, and opens a post on its own", async () => {
+    const room = await freshRoom("comment-refusals");
+    const ada = await connect(room, "Ada");
+    const [one, two] = [await post_(ada, "<p>One</p>"), await post_(ada, "<p>Two</p>")];
+    const comment = await reply(ada, one, "<p>On one</p>");
+    ada.send({ type: "message.create", clientMessageId: crypto.randomUUID(), body: "<p>Lost</p>", parentId: two.id, replyToId: comment.id });
+    expect(await ada.next("error")).toMatchObject({ failed: "message.create" });
+
+    ada.send({ type: "post.open", postId: one.id });
+    expect(await ada.next("post")).toMatchObject({ postId: one.id, post: { message: { id: one.id }, replies: [{ id: comment.id }], activeId: comment.id } });
+    ada.send({ type: "post.open", postId: comment.id });
+    expect(await ada.next("post")).toEqual({ type: "post", postId: comment.id, post: null });
   });
 });
