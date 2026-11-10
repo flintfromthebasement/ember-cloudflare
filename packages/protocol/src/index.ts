@@ -1475,6 +1475,13 @@ export interface Message {
   /** The replies in the message's thread, once it has some, as the room shows them under it. */
   thread?: ThreadSummary;
   /**
+   * For a reply to one of a post's comments, in a posts room, the comment: a reply in the post's thread
+   * that isn't a reply to a comment itself. Replies go two levels deep and no deeper.
+   */
+  replyToId?: string;
+  /** For a comment, a reply in a thread that isn't a reply to a comment, how many replies to it there are, once there are some. */
+  replyCount?: number;
+  /**
    * A message deleted while replies in its thread are left, which keeps its place for them: its text, file,
    * cards and boosts are gone, and it goes once its last reply does.
    */
@@ -1491,8 +1498,8 @@ export const parentTextOf = (plainText: string) => [...plainText].slice(0, PAREN
 export const THREAD_FACES = 4;
 
 /**
- * A post in a posts room: a message that isn't a reply, its newest replies, at most `POST_REPLIES_SHOWN`,
- * oldest first, and its latest activity, the id of its newest reply, or its own without one, which the
+ * A post in a posts room: a message that isn't a reply, its newest comments, the replies in its thread
+ * that aren't replies to comments, at most `POST_REPLIES_SHOWN`, oldest first, and its latest activity, the id of its newest reply, or its own without one, which the
  * room orders its posts by.
  */
 export interface Post {
@@ -1521,9 +1528,10 @@ export const isInRoom = (message: Pick<Message, "parentId" | "alsoSent">) => mes
 export type ClientFrame =
   /**
    * A new message, its body markup, as the composer writes it. The room keeps what it can show of it, or refuses it.
-   * With `parentId`, it's a reply in that message's thread, which `alsoSend` sends to the room too.
+   * With `parentId`, it's a reply in that message's thread, which `alsoSend` sends to the room too, and
+   * with `replyToId` as well, a reply to that comment in the thread, or, for a reply to a comment, beside it.
    */
-  | { type: "message.create"; clientMessageId: string; body: string; parentId?: string; alsoSend?: boolean }
+  | { type: "message.create"; clientMessageId: string; body: string; parentId?: string; alsoSend?: boolean; replyToId?: string }
   /** A message's new body, as for `message.create`. */
   | { type: "message.update"; messageId: string; body: string }
   | { type: "message.delete"; messageId: string }
@@ -1557,6 +1565,15 @@ export type ClientFrame =
    * room shows them: those whose latest activity came before `before`, or the newest without it.
    */
   | { type: "posts.before"; before?: string; limit?: number }
+  /** A post as a posts room shows it on its own, as its permalink opens it. */
+  | { type: "post.open"; postId: string }
+  /**
+   * Up to `limit` of a post's comments, the replies in its thread that aren't replies to comments, newest
+   * first: those before `before`, or the newest without it.
+   */
+  | { type: "comments.before"; parentId: string; before?: string; limit?: number }
+  /** Up to `limit` of a comment's replies, oldest first: those after `after`, or the oldest without it. */
+  | { type: "replies.after"; commentId: string; after?: string; limit?: number }
   /** Says the tab has been shown, or hidden, for a few seconds, since the socket's address or the last of these said otherwise. */
   | { type: "presence.visible"; visible: boolean }
   | { type: "ping" };
@@ -1628,6 +1645,12 @@ export type ServerFrame =
    * activity first, and whether there are older ones still.
    */
   | { type: "posts"; before: string | null; posts: Post[]; hasMore: boolean }
+  /** Answers post.open: the post, or null when the room has no such post. */
+  | { type: "post"; postId: string; post: Post | null }
+  /** Answers comments.before: the comments, newest first, and whether there are older ones still. */
+  | { type: "comments"; parentId: string; before: string | null; comments: Message[]; hasMore: boolean }
+  /** Answers replies.after: the replies, oldest first, and whether there are newer ones still. */
+  | { type: "replies"; commentId: string; after: string | null; replies: Message[]; hasMore: boolean }
   /**
    * `failed` names the request that went wrong, when the error answers one, and `clientMessageId` or
    * `clientMessageIds` the messages it was about.
@@ -1763,8 +1786,14 @@ export const HISTORY_PAGE_SIZE = 40;
 /** How many posts a page of a posts room holds, unless a tab asks for fewer. */
 export const POSTS_PAGE_SIZE = 20;
 
-/** How many of a post's newest replies a posts room shows under it, before View all replies. */
+/** How many of a post's newest comments a posts room shows under it, before View more comments. */
 export const POST_REPLIES_SHOWN = 2;
+
+/** How many more comments View more comments brings. */
+export const COMMENTS_PAGE_SIZE = 10;
+
+/** How many of a comment's replies View replies brings at a time. */
+export const COMMENT_REPLIES_PAGE_SIZE = 5;
 /** How many messages one message.check can ask about: more than anyone sends before a dead socket is noticed. */
 export const MAX_CHECKED_MESSAGES = 50;
 /** Keeps a room's name to what a sidebar row and a room's header can show. */
@@ -1882,7 +1911,9 @@ export function parseClientFrame(raw: string): ClientFrame | null {
       const body = markup(f.body);
       if (!id(f.clientMessageId) || body === null) return null;
       if (f.parentId === undefined) return { type: f.type, clientMessageId: f.clientMessageId, body };
-      return id(f.parentId) ? { type: f.type, clientMessageId: f.clientMessageId, body, parentId: f.parentId, alsoSend: f.alsoSend === true } : null;
+      if (!id(f.parentId) || (f.replyToId !== undefined && !id(f.replyToId))) return null;
+      const reply = { type: f.type, clientMessageId: f.clientMessageId, body, parentId: f.parentId, alsoSend: f.alsoSend === true } as const;
+      return f.replyToId === undefined ? reply : { ...reply, replyToId: f.replyToId };
     }
     case "message.update": {
       const body = markup(f.body);
@@ -1915,6 +1946,12 @@ export function parseClientFrame(raw: string): ClientFrame | null {
       return id(f.parentId) && id(f.before) ? { type: f.type, parentId: f.parentId, before: f.before, limit: pageLimit(f.limit) } : null;
     case "posts.before":
       return f.before === undefined || id(f.before) ? { type: f.type, before: f.before, limit: pageLimit(f.limit) } : null;
+    case "post.open":
+      return id(f.postId) ? { type: f.type, postId: f.postId } : null;
+    case "comments.before":
+      return id(f.parentId) && (f.before === undefined || id(f.before)) ? { type: f.type, parentId: f.parentId, before: f.before, limit: pageLimit(f.limit) } : null;
+    case "replies.after":
+      return id(f.commentId) && (f.after === undefined || id(f.after)) ? { type: f.type, commentId: f.commentId, after: f.after, limit: pageLimit(f.limit) } : null;
     case "presence.visible":
       return typeof f.visible === "boolean" ? { type: f.type, visible: f.visible } : null;
     case "typing.start":

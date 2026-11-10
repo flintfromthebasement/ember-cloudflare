@@ -51,6 +51,10 @@ interface MessageRow {
   repliers?: string | null;
   /** For a reply, the start of its parent's plain text, or null once the parent is deleted. */
   parent_text?: string | null;
+  /** For a reply to a comment, the comment, or null; missing from a row the search index kept before comments had replies. */
+  reply_to_id?: string | null;
+  /** For a comment, how many replies to it there are, or null for any other message. */
+  reply_count?: number | null;
 }
 
 /** How many replies a message's thread has, and when the newest was written, if it has any. */
@@ -93,13 +97,14 @@ interface DeletingRow {
   deleted: number;
   /** 1 when its thread has replies left once the messages being deleted have gone. */
   replies_left: number;
+  reply_to_id: string | null;
 }
 
 /**
  * Of the messages a JSON array ?3 names that room ?1 has, whose replies each is, whether it's been kept for
  * its thread already, and whether its thread has replies other than those a JSON array ?2 names.
  */
-const REPLIES_LEFT = `SELECT id, parent_id, deleted, EXISTS (
+const REPLIES_LEFT = `SELECT id, parent_id, reply_to_id, deleted, EXISTS (
     SELECT 1 FROM messages AS replies WHERE replies.parent_id = messages.id AND replies.id NOT IN (SELECT value FROM json_each(?2))
   ) AS replies_left
   FROM messages WHERE room_id = ?1 AND id IN (SELECT value FROM json_each(?3))`;
@@ -194,6 +199,8 @@ function toMessage(row: MessageRow): Message {
     // A row the search index kept from before threads has none of their columns.
     ...(row.parent_id != null && { parentId: row.parent_id, alsoSent: row.in_room === 1, parentText: row.parent_text ?? "" }),
     ...(thread && { thread }),
+    ...(row.reply_to_id != null && { replyToId: row.reply_to_id }),
+    ...(row.reply_count != null && row.reply_count > 0 && { replyCount: row.reply_count }),
     ...(row.deleted === 1 && { deleted: true }),
   };
 }
@@ -251,7 +258,9 @@ const SELECT_MESSAGES = `SELECT messages.*, (
     )
   ) END AS repliers, CASE WHEN messages.parent_id IS NOT NULL THEN (
     SELECT substr(parents.plain_text, 1, ${PARENT_TEXT_LENGTH}) FROM messages AS parents WHERE parents.id = messages.parent_id
-  ) END AS parent_text FROM messages`;
+  ) END AS parent_text, CASE WHEN messages.parent_id IS NOT NULL AND messages.reply_to_id IS NULL THEN (
+    SELECT count(*) FROM messages AS answers WHERE answers.reply_to_id = messages.id
+  ) END AS reply_count FROM messages`;
 
 // The newest page and the pages before and after a message are separate statements: SQLite can't seek an
 // index through `? IS NULL OR id < ?`, so a single statement walked the room from its newest message
@@ -301,13 +310,24 @@ const POSTS_ACTIVITY = `SELECT coalesce(parent_id, id) AS post_id, max(id) AS ac
 export const NEWEST_POSTS = `${POSTS_ACTIVITY} ORDER BY active_id DESC LIMIT ?`;
 export const POSTS_BEFORE = `${POSTS_ACTIVITY} HAVING max(id) < ? ORDER BY active_id DESC LIMIT ?`;
 
-/** The newest `POST_REPLIES_SHOWN` replies in each of the threads whose parents a JSON array lists. */
+/** The newest `POST_REPLIES_SHOWN` comments, replies that aren't replies to comments, in each of the threads whose parents a JSON array lists. */
 const NEWEST_REPLIES_OF = `${SELECT_MESSAGES} WHERE room_id = ? AND id IN (
     SELECT id FROM (
       SELECT id, row_number() OVER (PARTITION BY parent_id ORDER BY id DESC) AS place FROM messages
-      WHERE parent_id IN (SELECT value FROM json_each(?))
+      WHERE parent_id IN (SELECT value FROM json_each(?)) AND reply_to_id IS NULL
     ) WHERE place <= ${POST_REPLIES_SHOWN}
   )`;
+
+/** A post's comments, the replies in its thread that aren't replies to comments, newest first: the newest, and those before one. */
+export const NEWEST_COMMENTS = `${SELECT_MESSAGES} WHERE room_id = ? AND parent_id = ? AND reply_to_id IS NULL ORDER BY id DESC LIMIT ?`;
+export const COMMENTS_BEFORE = `${SELECT_MESSAGES} WHERE room_id = ? AND parent_id = ? AND reply_to_id IS NULL AND id < ? ORDER BY id DESC LIMIT ?`;
+
+/** A comment's replies, oldest first: the oldest, and those after one. */
+export const OLDEST_COMMENT_REPLIES = `${SELECT_MESSAGES} WHERE room_id = ? AND reply_to_id = ? ORDER BY id LIMIT ?`;
+export const COMMENT_REPLIES_AFTER = `${SELECT_MESSAGES} WHERE room_id = ? AND reply_to_id = ? AND id > ? ORDER BY id LIMIT ?`;
+
+/** The replies to the comments of room ?1 a JSON array ?2 names, which go when their comments do. */
+const REPLIES_TO_COMMENTS = `SELECT id FROM messages WHERE room_id = ?1 AND reply_to_id IN (SELECT value FROM json_each(?2))`;
 
 /**
  * The longest row the search index keeps for a result to show, in UTF-16 code units: a row of Durable
@@ -324,6 +344,8 @@ const MESSAGES_ANYWHERE_WITH_IDS = `${SELECT_MESSAGES} WHERE id IN (SELECT value
 export interface InThread {
   parent: Message;
   alsoSend: boolean;
+  /** For a reply to a comment in the thread, the comment. */
+  replyTo?: Message;
 }
 
 /** A message changed as another changed, with the number of its change. */
@@ -494,6 +516,36 @@ export class MessageStore {
     return { posts, hasMore: activity.length > limit };
   }
 
+  /** Up to `limit` of the comments on post `parentId` before `before`, or its newest, newest first, and whether there are older ones still. */
+  async comments(parentId: string, limit: number, before?: string): Promise<{ comments: Message[]; hasMore: boolean }> {
+    const rows =
+      before === undefined
+        ? await this.db.all<MessageRow>(NEWEST_COMMENTS, this.roomId, parentId, limit + 1)
+        : await this.db.all<MessageRow>(COMMENTS_BEFORE, this.roomId, parentId, before, limit + 1);
+    return { comments: await this.messagesOf(rows.slice(0, limit)), hasMore: rows.length > limit };
+  }
+
+  /** Up to `limit` of the replies to comment `commentId` after `after`, or its oldest, oldest first, and whether there are newer ones still. */
+  async commentReplies(commentId: string, limit: number, after?: string): Promise<{ replies: Message[]; hasMore: boolean }> {
+    const rows =
+      after === undefined
+        ? await this.db.all<MessageRow>(OLDEST_COMMENT_REPLIES, this.roomId, commentId, limit + 1)
+        : await this.db.all<MessageRow>(COMMENT_REPLIES_AFTER, this.roomId, commentId, after, limit + 1);
+    return { replies: await this.messagesOf(rows.slice(0, limit)), hasMore: rows.length > limit };
+  }
+
+  /** Post `postId` as a posts room shows it, or null when the room has no such post or it's a reply. */
+  async post(postId: string): Promise<Post | null> {
+    const message = await this.find(postId);
+    if (!message || message.parentId !== undefined) return null;
+    const ids = JSON.stringify([postId]);
+    const [activity, replies] = await Promise.all([
+      this.db.all<{ active_id: string | null }>(`SELECT max(id) AS active_id FROM messages WHERE room_id = ? AND parent_id = ?`, this.roomId, postId),
+      this.db.all<MessageRow>(NEWEST_REPLIES_OF, this.roomId, ids).then((rows) => this.messagesOf(rows)),
+    ]);
+    return { message, replies: replies.sort(byId), activeId: activity[0]?.active_id ?? postId };
+  }
+
   /** The newest `limit` replies in the thread of `parentId` older than `before`, oldest first. */
   async repliesBefore(parentId: string, before: string, limit: number): Promise<Page> {
     return this.toPage(await this.db.all<MessageRow>(REPLIES_BEFORE, this.roomId, parentId, before, limit + 1), limit);
@@ -553,13 +605,14 @@ export class MessageStore {
     kind: "message" | "reply" = "message",
     posted?: PostedFile,
     inThread?: InThread,
-  ): Promise<{ message: Message; seq: number; parent: Changed | null }> {
+  ): Promise<{ message: Message; seq: number; parent: Changed | null; comment: Changed | null }> {
     const inRoom = !inThread || inThread.alsoSend;
+    const replyTo = inThread?.replyTo;
     const seq = await this.change(
       (seq) => [
         statement(
-          `INSERT INTO messages (id, room_id, client_message_id, creator_id, creator_name, body, plain_text, mentions, created_at, updated_at, change_seq, attachment, cards, parent_id, in_room)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO messages (id, room_id, client_message_id, creator_id, creator_name, body, plain_text, mentions, created_at, updated_at, change_seq, attachment, cards, parent_id, in_room, reply_to_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           id,
           this.roomId,
           clientMessageId,
@@ -575,18 +628,23 @@ export class MessageStore {
           body.cards ? JSON.stringify(body.cards) : null,
           inThread?.parent.id ?? null,
           inRoom ? 1 : 0,
+          replyTo?.id ?? null,
         ),
         logEvent(this.roomId, kind, creator.id, now, id, inRoom),
         logIndexing(this.roomId, id),
         ...(posted ? [posted.finished(id)] : []),
         ...(inThread ? [this.numbered(inThread.parent.id, seq + 1), logIndexing(this.roomId, inThread.parent.id)] : []),
+        // The comment a reply answers counts it.
+        ...(replyTo ? [this.numbered(replyTo.id, seq + 2)] : []),
       ],
-      inThread ? 2 : 1,
+      replyTo ? 3 : inThread ? 2 : 1,
     );
-    // The room is the only writer of its messages, so the parent is as this left it.
+    // The room is the only writer of its messages, so the parent and the comment are as this left them.
     const parent = inThread ? { message: (await this.find(inThread.parent.id))!, seq: seq + 1 } : null;
+    const comment = replyTo ? { message: (await this.find(replyTo.id))!, seq: seq + 2 } : null;
     return {
       parent,
+      comment,
       message: {
         id,
         clientMessageId,
@@ -602,6 +660,7 @@ export class MessageStore {
         ...(posted && { attachment: await shownFile(posted.file, await this.sign()) }),
         ...(body.cards && { cards: body.cards }),
         ...(inThread && { parentId: inThread.parent.id, alsoSent: inThread.alsoSend, parentText: parentTextOf(inThread.parent.plainText) }),
+        ...(replyTo && { replyToId: replyTo.id }),
       },
       seq,
     };
@@ -706,7 +765,9 @@ export class MessageStore {
    * text now. The ids go as JSON values, which a page of them can fill.
    */
   async delete(ids: string[]): Promise<Deletion> {
-    const listed = JSON.stringify(ids);
+    // A comment's replies go with it.
+    const answers = (await this.db.all<{ id: string }>(REPLIES_TO_COMMENTS, this.roomId, JSON.stringify(ids))).map(({ id }) => id);
+    const listed = JSON.stringify([...new Set([...ids, ...answers])]);
     const named = await this.db.all<DeletingRow>(REPLIES_LEFT, this.roomId, listed, listed);
     const kept = named.filter((row) => row.replies_left === 1 && row.deleted === 0).map((row) => row.id);
     const deletedIds = named.filter((row) => row.replies_left === 0).map((row) => row.id);
@@ -716,7 +777,10 @@ export class MessageStore {
     const parents = parentIds.length === 0 ? [] : await this.db.all<DeletingRow>(REPLIES_LEFT, this.roomId, JSON.stringify(deletedIds), JSON.stringify(parentIds));
     const emptied = parents.filter((row) => row.deleted === 1 && row.replies_left === 0).map((row) => row.id);
     deletedIds.push(...emptied);
-    const changedIds = [...kept, ...parents.map((row) => row.id).filter((id) => !emptied.includes(id))];
+    // The comments that lose replies, but for those deleted themselves, count them again.
+    const gone = new Set(deletedIds);
+    const commentIds = [...new Set(named.flatMap((row) => (row.replies_left === 0 && row.reply_to_id !== null && !gone.has(row.reply_to_id) ? [row.reply_to_id] : [])))];
+    const changedIds = [...kept, ...parents.map((row) => row.id).filter((id) => !emptied.includes(id)), ...commentIds.filter((id) => !kept.includes(id))];
     const count = deletedIds.length + changedIds.length;
     if (count === 0) return { deletedIds, changed: [], seq: (await this.latestChange()) + 1 };
     const [deletedList, keptList, changedList] = [deletedIds, kept, changedIds].map((list) => JSON.stringify(list)) as [string, string, string];

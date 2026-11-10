@@ -2,6 +2,8 @@ import { DurableObject } from "cloudflare:workers";
 import {
   ASSISTANT_ID,
   CloseCode,
+  COMMENT_REPLIES_PAGE_SIZE,
+  COMMENTS_PAGE_SIZE,
   HISTORY_PAGE_SIZE,
   POSTS_PAGE_SIZE,
   isMessageTooLong,
@@ -805,7 +807,7 @@ export class ChatRoom extends DurableObject<Env> {
     switch (frame.type) {
       case "message.create": {
         if (isOutdated(ws)) return this.send(ws, { type: "error", message: OUTDATED, clientMessageId: frame.clientMessageId, failed: frame.type });
-        const inThread = frame.parentId === undefined ? undefined : await this.inThread(store, frame.parentId, frame.alsoSend === true);
+        const inThread = frame.parentId === undefined ? undefined : await this.inThread(store, frame.parentId, frame.alsoSend === true, frame.replyToId);
         if (inThread === null) return this.send(ws, { type: "error", message: MESSAGE_GONE, clientMessageId: frame.clientMessageId, failed: frame.type });
         const body = await this.prepare(frame.body);
         if (typeof body === "string") return this.send(ws, { type: "error", message: body, clientMessageId: frame.clientMessageId, failed: frame.type });
@@ -877,6 +879,16 @@ export class ChatRoom extends DurableObject<Env> {
         const { messages, hasMore } = await store.repliesBefore(frame.parentId, frame.before, frame.limit ?? HISTORY_PAGE_SIZE);
         return this.send(ws, { type: "thread.history", parentId: frame.parentId, before: frame.before, messages, hasMore });
       }
+      case "post.open":
+        return this.send(ws, { type: "post", postId: frame.postId, post: await store.post(frame.postId) });
+      case "comments.before": {
+        const { comments, hasMore } = await store.comments(frame.parentId, frame.limit ?? COMMENTS_PAGE_SIZE, frame.before);
+        return this.send(ws, { type: "comments", parentId: frame.parentId, before: frame.before ?? null, comments, hasMore });
+      }
+      case "replies.after": {
+        const { replies, hasMore } = await store.commentReplies(frame.commentId, frame.limit ?? COMMENT_REPLIES_PAGE_SIZE, frame.after);
+        return this.send(ws, { type: "replies", commentId: frame.commentId, after: frame.after ?? null, replies, hasMore });
+      }
       case "posts.before": {
         const { posts, hasMore } = await store.posts(frame.limit ?? POSTS_PAGE_SIZE, frame.before);
         return this.send(ws, { type: "posts", before: frame.before ?? null, posts, hasMore });
@@ -901,9 +913,10 @@ export class ChatRoom extends DurableObject<Env> {
   private async create(store: MessageStore, user: User, clientMessageId: string, body: StoredBody, now: string, { kind, posted, inThread }: Posting = {}): Promise<Message> {
     // Before the batch, which on D1 may save the message even when it fails.
     if (!inThread || inThread.alsoSend) this.readers.clear();
-    const { message, seq, parent } = await store.create(sortableId(), clientMessageId, user, body, now, kind, posted, inThread);
+    const { message, seq, parent, comment } = await store.create(sortableId(), clientMessageId, user, body, now, kind, posted, inThread);
     this.broadcast({ type: "message.created", message, seq });
     if (parent) this.broadcast({ type: "message.updated", ...parent });
+    if (comment) this.broadcast({ type: "message.updated", ...comment });
     const couriers = this.couriersFor(store.roomId);
     couriers.workspace.deliver();
     couriers.index.deliver();
@@ -1010,9 +1023,14 @@ export class ChatRoom extends DurableObject<Env> {
    * says so, or null when the room has no such message, or it's a reply, which has no thread. A thread
    * whose message was deleted while it had replies still takes them.
    */
-  private async inThread(store: MessageStore, parentId: string, alsoSend: boolean): Promise<InThread | null> {
-    const parent = await store.find(parentId);
-    return parent && parent.parentId === undefined ? { parent, alsoSend } : null;
+  private async inThread(store: MessageStore, parentId: string, alsoSend: boolean, replyToId?: string): Promise<InThread | null> {
+    const [parent, answered] = await Promise.all([store.find(parentId), replyToId === undefined ? null : store.find(replyToId)]);
+    if (!parent || parent.parentId !== undefined) return null;
+    if (replyToId === undefined) return { parent, alsoSend };
+    // A reply to a comment in the thread, or to one of its replies, which goes beside it, under the same comment.
+    if (!answered || answered.parentId !== parentId) return null;
+    const replyTo = answered.replyToId === undefined ? answered : await store.find(answered.replyToId);
+    return replyTo && !replyTo.deleted ? { parent, alsoSend, replyTo } : null;
   }
 
   /**
