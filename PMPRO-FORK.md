@@ -103,6 +103,16 @@ live `assets/index-*.js`.
 `scripts/deploy.test.ts` fails on `pmpro` by design: it expects the stock `ember` names that
 `wrangler.jsonc` renames. Every other test passes.
 
+## Admin changes on the live chat
+
+Flint has an administrator account on chat.paidmembershipspro.com, "PMPro Admin", whose email and
+password are `EMBER_PMPRO_EMAIL` and `EMBER_PMPRO_PASSWORD` in `~/.env`. Use it for room settings and
+other admin changes; Flint's and Nugget's bot accounts can't make them. Sign in with
+`POST /api/session` (`{"emailAddress", "password"}`), sending `Origin: https://chat.paidmembershipspro.com`
+and `Sec-Fetch-Site: same-origin`, or Ember refuses the request as cross-site. Keep the cookie in the
+scratchpad, make the change (for example `PATCH /api/rooms/<id>` with `{"posts": true}`), then
+`DELETE /api/session` and delete the cookie file.
+
 ## Related code outside this repo
 
 - `pmpro-ember` WordPress plugin (`/home/flint/projects/pmpro-ember/`): the site side of the
