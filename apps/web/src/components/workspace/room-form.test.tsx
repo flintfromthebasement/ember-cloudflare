@@ -18,6 +18,8 @@ function renderForm(props: Partial<ComponentProps<typeof RoomForm<User>>> = {}, 
       onNameChange={vi.fn()}
       icon={null}
       onIconChange={vi.fn()}
+      posts={false}
+      onPostsChange={vi.fn()}
       everyone={null}
       groups={[people(3)]}
       mark={() => <CheckMark />}
@@ -68,13 +70,14 @@ describe("Create an open room", () => {
   it("leaves the switch off the Everyone row when it can't flip", () => {
     renderForm({ everyone: { on: true } });
     expect(names()[0]).toBe("Everyone");
-    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: /access to this room/ })).not.toBeInTheDocument();
   });
 
   it("disables Save and every switch while saving", () => {
     renderForm({ saving: true, everyone: { on: false, onFlip: vi.fn() }, mark: (person) => <AccessSwitch person={person} checked onCheckedChange={vi.fn()} /> });
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-    expect(screen.getAllByRole("switch")).toHaveLength(4);
+    // Posts, Everyone and the three people's.
+    expect(screen.getAllByRole("switch")).toHaveLength(5);
     for (const toggle of screen.getAllByRole("switch")) expect(toggle).toBeDisabled();
   });
 });

@@ -293,9 +293,9 @@ let host: Promise<Session> | undefined;
  * Creates a room through the API as `as`, or as the tests' host: an open room everyone is in, or a
  * closed one for just the people `closedTo` names.
  */
-export async function createRoom(name: string, { closedTo, icon, as }: { closedTo?: UserId[]; icon?: RoomIconChoice; as?: Session } = {}): Promise<SharedRoom> {
+export async function createRoom(name: string, { closedTo, icon, posts, as }: { closedTo?: UserId[]; icon?: RoomIconChoice; posts?: boolean; as?: Session } = {}): Promise<SharedRoom> {
   const { cookie } = as ?? (await (host ??= signIn("Host")));
-  const room = closedTo ? { kind: "closed", name, icon, memberIds: closedTo } : { kind: "open", name, icon };
+  const room = closedTo ? { kind: "closed", name, icon, posts, memberIds: closedTo } : { kind: "open", name, icon, posts };
   const response = await api("/api/rooms", { method: "POST", headers: { Cookie: cookie }, body: JSON.stringify(room) });
   expect(response.status, await response.clone().text()).toBe(201);
   return ((await response.json()) as { room: SharedRoom }).room;

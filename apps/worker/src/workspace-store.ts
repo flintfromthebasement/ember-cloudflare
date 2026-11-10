@@ -493,7 +493,7 @@ export interface ReportedHuddle {
 
 /** What changing a room changed, and who's in it then. */
 export interface SavedRoomChange {
-  /** Whether its name, kind or icon changed. */
+  /** Whether its name, kind, icon or posts setting changed. */
   roomChanged: boolean;
   memberIds: UserId[];
   /** Who the change put in the room. */
@@ -1193,7 +1193,8 @@ function navigationIconsIn(settings: Record<string, unknown> | null): Navigation
   return icons;
 }
 
-interface RoomToChangeRow extends SharedRoom {
+interface RoomToChangeRow extends Omit<SharedRoom, "posts"> {
+  posts: number;
   can_administer: number;
 }
 
@@ -1209,6 +1210,7 @@ interface SidebarRow extends HuddleRow {
   kind: SidebarRoom["kind"];
   name: string | null;
   icon: SharedRoom["icon"];
+  posts: number | null;
   active_at: string;
   unread: number;
   involvement: Involvement;
@@ -1252,8 +1254,11 @@ const isRanked = (rows: unknown[]) => (rows as Array<{ ranked: number }>)[0]?.ra
 const membersOf = (rows: DirectMemberRow[]): User[] => rows.map(({ id, name }) => ({ id, name }));
 
 /** A room someone is in, with the people in it if it's a DM, whom `members` reads. */
-const roomOf = ({ id, kind, name, icon, active_at }: SidebarRow, members: DirectMemberRow[] = []): Room =>
-  kind === "direct" ? { id, kind, members: membersOf(members), activeAt: active_at } : { id, kind, name: name ?? "", icon };
+const roomOf = ({ id, kind, name, icon, posts, active_at }: SidebarRow, members: DirectMemberRow[] = []): Room =>
+  kind === "direct" ? { id, kind, members: membersOf(members), activeAt: active_at } : { id, kind, name: name ?? "", icon, ...postsOf(posts) };
+
+/** A shared room's posts setting as its row keeps it, which a room of chat leaves out. */
+export const postsOf = (posts: number | null | undefined): Pick<SharedRoom, "posts"> => (posts === 1 ? { posts: true } : {});
 
 /** A room as someone's sidebar lists it, with whether it's marked unread for them and their level in it. */
 const sidebarRoom = (row: SidebarRow, members?: DirectMemberRow[]): SidebarRoom => ({
@@ -1262,7 +1267,7 @@ const sidebarRoom = (row: SidebarRow, members?: DirectMemberRow[]): SidebarRoom 
   involvement: row.involvement,
 });
 
-const roomToChange = (row: RoomToChangeRow) => ({ room: { id: row.id, kind: row.kind, name: row.name, icon: row.icon }, canAdminister: row.can_administer === 1 });
+const roomToChange = (row: RoomToChangeRow) => ({ room: { id: row.id, kind: row.kind, name: row.name, icon: row.icon, ...postsOf(row.posts) }, canAdminister: row.can_administer === 1 });
 
 const storedSession = (row: SessionRow): StoredSession => ({
   id: row.session_id,
@@ -1282,7 +1287,7 @@ const ACTIVE_AT = `coalesce(rooms.last_message_at, rooms.created_at) AS active_a
  * before the Workspace kept a list (`LEGACY_ROOMS`) have ids that don't sort by time, so they go by when
  * they were listed.
  */
-export const ROOMS_FOR_USER = `SELECT rooms.id, rooms.kind, rooms.name, rooms.icon, ${ACTIVE_AT}, memberships.unread_at IS NOT NULL AS unread,
+export const ROOMS_FOR_USER = `SELECT rooms.id, rooms.kind, rooms.name, rooms.icon, rooms.posts, ${ACTIVE_AT}, memberships.unread_at IS NOT NULL AS unread,
     memberships.involvement, rooms.shared_position, rooms.huddle_started_at, rooms.huddle_user_ids
   FROM memberships JOIN rooms ON rooms.id = memberships.room_id
   WHERE memberships.user_id = ? ORDER BY rooms.created_at, rooms.id`;
@@ -2188,7 +2193,7 @@ const MENTIONABLE_MEMBERS = `SELECT ${DIRECTORY_COLUMNS}
 const CAN_ADMINISTER = `(users.role = ${ADMINISTRATOR} OR rooms.creator_id = users.id) AS can_administer`;
 
 /** A room someone is in, unless it's a DM, and whether they can change it. */
-export const ROOM_TO_CHANGE = `SELECT rooms.id, rooms.kind, rooms.name, rooms.icon, ${CAN_ADMINISTER}
+export const ROOM_TO_CHANGE = `SELECT rooms.id, rooms.kind, rooms.name, rooms.icon, rooms.posts, ${CAN_ADMINISTER}
   FROM memberships JOIN rooms ON rooms.id = memberships.room_id JOIN users ON users.id = memberships.user_id
   WHERE memberships.room_id = ? AND memberships.user_id = ? AND rooms.kind <> 'direct'`;
 
@@ -2252,13 +2257,14 @@ export const ROOM_MEMBERS = `SELECT user_id FROM memberships WHERE room_id = ?`;
 const ROOM_RANKED = `SELECT shared_position IS NOT NULL AS ranked FROM rooms WHERE id = ?`;
 
 /**
- * Renames a room, changes its kind and sets its icon, keeping whichever is null as it is, and records
- * when, unless nothing changes. An icon of "" is the default `#`, stored as null.
+ * Renames a room, changes its kind, sets its icon and whether it's a posts room (?6, 1 or 0), keeping
+ * whichever is null as it is, and records when, unless nothing changes. An icon of "" is the default `#`,
+ * stored as null.
  */
 const UPDATE_ROOM = `UPDATE rooms SET name = coalesce(?1, name), kind = coalesce(?2, kind),
-    icon = CASE WHEN ?3 IS NULL THEN icon ELSE nullif(?3, '') END, updated_at = ?4
+    icon = CASE WHEN ?3 IS NULL THEN icon ELSE nullif(?3, '') END, posts = coalesce(?6, posts), updated_at = ?4
   WHERE id = ?5 AND (name IS NOT coalesce(?1, name) OR kind IS NOT coalesce(?2, kind)
-    OR icon IS NOT CASE WHEN ?3 IS NULL THEN icon ELSE nullif(?3, '') END) RETURNING id`;
+    OR icon IS NOT CASE WHEN ?3 IS NULL THEN icon ELSE nullif(?3, '') END OR posts IS NOT coalesce(?6, posts)) RETURNING id`;
 
 /** Of the rooms a JSON list names, those that are neither registered nor deleted. */
 const UNREGISTERED_ROOMS = `SELECT DISTINCT value AS id FROM json_each(?)
@@ -3787,7 +3793,8 @@ export class WorkspaceStore {
    * order ranks it.
    */
   async changeRoom(roomId: RoomId, changes: RoomChanges, code: CloseCode, dueAt: number, now: string): Promise<SavedRoomChange> {
-    const update = statement(UPDATE_ROOM, changes.name ?? null, changes.kind ?? null, changes.icon ?? null, now, roomId);
+    const posts = changes.posts === undefined ? null : changes.posts ? 1 : 0;
+    const update = statement(UPDATE_ROOM, changes.name ?? null, changes.kind ?? null, changes.icon ?? null, now, roomId, posts);
     const members = statement(ROOM_MEMBERS, roomId);
     const ranked = statement(ROOM_RANKED, roomId);
     if (changes.kind === "open") {
@@ -3869,11 +3876,12 @@ export class WorkspaceStore {
   async createRoom(room: SharedRoom, creatorId: UserId, memberIds: UserId[] | null, now: string): Promise<UserId[]> {
     const [, members] = (await this.db.batch([
       statement(
-        `INSERT INTO rooms (id, kind, name, icon, creator_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO rooms (id, kind, name, icon, posts, creator_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         room.id,
         room.kind,
         room.name,
         room.icon,
+        room.posts ? 1 : 0,
         creatorId,
         now,
         now,

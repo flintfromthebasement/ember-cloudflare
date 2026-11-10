@@ -224,6 +224,12 @@ export interface SharedRoom {
   name: string;
   /** Null for the default `#`. */
   icon: RoomIconName | null;
+  /**
+   * Whether it's a posts room, as a community's forum has them: every message in it is a post, which
+   * people answer in its thread, and it shows the posts with the newest replies first. Left out for a
+   * room of chat.
+   */
+  posts?: true;
 }
 
 /**
@@ -318,7 +324,7 @@ export const suggestedCount = (peopleInDirects: number) => Math.max(0, SUGGESTED
  * A room to create: an open room takes in everyone, and a closed one only the people `memberIds` names.
  * Without an icon, it has the default `#`.
  */
-export type NewRoom = { name: string; icon?: RoomIconChoice } & ({ kind: "open" } | { kind: "closed"; memberIds: UserId[] });
+export type NewRoom = { name: string; icon?: RoomIconChoice; posts?: boolean } & ({ kind: "open" } | { kind: "closed"; memberIds: UserId[] });
 
 /** Someone active, as a room's settings list them, with whether they're in the room. */
 export interface RoomPerson extends User {
@@ -353,10 +359,11 @@ export interface RoomSettings {
 }
 
 /**
- * What `PATCH /api/rooms/<id>` changes in a room, as its settings save it: its name, its icon, and who
+ * What `PATCH /api/rooms/<id>` changes in a room, as its settings save it: its name, its icon, whether
+ * it's a posts room, and who
  * it's for, everyone or just the people `memberIds` names, which takes anyone else out of it.
  */
-export type RoomChanges = { name?: string; icon?: RoomIconChoice } & ({ kind?: "open" } | { kind: "closed"; memberIds: UserId[] });
+export type RoomChanges = { name?: string; icon?: RoomIconChoice; posts?: boolean } & ({ kind?: "open" } | { kind: "closed"; memberIds: UserId[] });
 
 /**
  * The rail's buttons and the appearance modes, whose icons an administrator can choose in Community
@@ -1505,6 +1512,17 @@ export const parentTextOf = (plainText: string) => [...plainText].slice(0, PAREN
 /** How many of the people who replied in a thread its summary shows. */
 export const THREAD_FACES = 4;
 
+/**
+ * A post in a posts room: a message that isn't a reply, its newest replies, at most `POST_REPLIES_SHOWN`,
+ * oldest first, and its latest activity, the id of its newest reply, or its own without one, which the
+ * room orders its posts by.
+ */
+export interface Post {
+  message: Message;
+  replies: Message[];
+  activeId: string;
+}
+
 /** A thread, as the room shows it under the message it's for. */
 export interface ThreadSummary {
   /** How many replies it has. */
@@ -1556,6 +1574,11 @@ export type ClientFrame =
   | { type: "thread.close"; parentId: string }
   /** Up to `limit` of a thread's replies before one, oldest first, as its history pages back from the oldest it holds. */
   | { type: "thread.before"; parentId: string; before: string; limit?: number }
+  /**
+   * Up to `limit` of the room's posts, its messages that aren't replies, newest activity first, as a posts
+   * room shows them: those whose latest activity came before `before`, or the newest without it.
+   */
+  | { type: "posts.before"; before?: string; limit?: number }
   /** Says the tab has been shown, or hidden, for a few seconds, since the socket's address or the last of these said otherwise. */
   | { type: "presence.visible"; visible: boolean }
   | { type: "ping" };
@@ -1622,6 +1645,11 @@ export type ServerFrame =
   | { type: "thread.opened"; parentId: string; parent: Message | null; messages: Message[]; hasMore: boolean }
   /** Answers thread.before: the replies before `before`, oldest first, and whether there are older ones still. */
   | { type: "thread.history"; parentId: string; before: string; messages: Message[]; hasMore: boolean }
+  /**
+   * Answers posts.before: the room's posts after the activity `before` names, or its newest, newest
+   * activity first, and whether there are older ones still.
+   */
+  | { type: "posts"; before: string | null; posts: Post[]; hasMore: boolean }
   /**
    * `failed` names the request that went wrong, when the error answers one, and `clientMessageId` or
    * `clientMessageIds` the messages it was about.
@@ -1753,6 +1781,12 @@ export const MAX_BOOST_LENGTH = 16;
  * message.
  */
 export const HISTORY_PAGE_SIZE = 40;
+
+/** How many posts a page of a posts room holds, unless a tab asks for fewer. */
+export const POSTS_PAGE_SIZE = 20;
+
+/** How many of a post's newest replies a posts room shows under it, before View all replies. */
+export const POST_REPLIES_SHOWN = 2;
 /** How many messages one message.check can ask about: more than anyone sends before a dead socket is noticed. */
 export const MAX_CHECKED_MESSAGES = 50;
 /** Keeps a room's name to what a sidebar row and a room's header can show. */
@@ -1901,6 +1935,8 @@ export function parseClientFrame(raw: string): ClientFrame | null {
       return id(f.parentId) ? { type: f.type, parentId: f.parentId } : null;
     case "thread.before":
       return id(f.parentId) && id(f.before) ? { type: f.type, parentId: f.parentId, before: f.before, limit: pageLimit(f.limit) } : null;
+    case "posts.before":
+      return f.before === undefined || id(f.before) ? { type: f.type, before: f.before, limit: pageLimit(f.limit) } : null;
     case "presence.visible":
       return typeof f.visible === "boolean" ? { type: f.type, visible: f.visible } : null;
     case "typing.start":
@@ -1939,6 +1975,9 @@ export function isRoomIcon(value: unknown): value is RoomIconName {
 
 const ICON_REFUSED = 'Icon must be one of the room icons, or "" for the default';
 
+/** Why a room's posts setting is refused: it's true or false, or left out. */
+const POSTS_REFUSED = "Posts must be true or false";
+
 /**
  * A room's icon: undefined when it's left out, which keeps the icon, or null when it's neither "" nor
  * exactly an icon's name.
@@ -1957,9 +1996,11 @@ export function parseNewRoom(data: unknown): NewRoom | string {
   if (!name) return `Name must be 1 to ${MAX_ROOM_NAME_LENGTH} characters`;
   const icon = iconChoice(r.icon);
   if (icon === null) return ICON_REFUSED;
-  if (r.kind === "open") return { kind: r.kind, name, icon };
+  if (r.posts !== undefined && typeof r.posts !== "boolean") return POSTS_REFUSED;
+  const posts = r.posts === true || undefined;
+  if (r.kind === "open") return { kind: r.kind, name, icon, posts };
   const memberIds = r.memberIds ?? [];
-  return userIds(memberIds) ? { kind: r.kind, name, icon, memberIds } : `Members must be a list of at most ${MAX_LISTED_USERS} user ids`;
+  return userIds(memberIds) ? { kind: r.kind, name, icon, posts, memberIds } : `Members must be a list of at most ${MAX_LISTED_USERS} user ids`;
 }
 
 /**
@@ -1973,7 +2014,8 @@ export function parseRoomChanges(data: unknown): RoomChanges | string {
   if (name === null) return `Name must be 1 to ${MAX_ROOM_NAME_LENGTH} characters`;
   const icon = iconChoice(r.icon);
   if (icon === null) return ICON_REFUSED;
-  const changes = { name, icon };
+  if (r.posts !== undefined && typeof r.posts !== "boolean") return POSTS_REFUSED;
+  const changes = { name, icon, posts: r.posts as boolean | undefined };
   if (r.kind === undefined) return changes;
   if (r.kind === "open") return { ...changes, kind: r.kind };
   if (r.kind !== "closed") return 'Kind must be "open" or "closed"';

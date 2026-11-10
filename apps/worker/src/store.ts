@@ -1,4 +1,4 @@
-import { PARENT_TEXT_LENGTH, parentTextOf, THREAD_FACES, type Boost, type Card, type Message, type RoomId, type ThreadSummary, type TimelinePage, type User, type UserId } from "@ember/protocol";
+import { PARENT_TEXT_LENGTH, parentTextOf, POST_REPLIES_SHOWN, THREAD_FACES, type Boost, type Card, type Message, type Post, type RoomId, type ThreadSummary, type TimelinePage, type User, type UserId } from "@ember/protocol";
 import { hasLinkable, type PreparedBody } from "@ember/richtext";
 import { statement, type Db, type Statement } from "./db";
 import { fileSigner, type FileUrls } from "./files/addresses";
@@ -292,6 +292,24 @@ export const MESSAGES_DELETED_SINCE = `SELECT message_id FROM message_deletions 
 const MESSAGES_WITH_IDS = `${SELECT_MESSAGES} WHERE room_id = ? AND id IN (SELECT value FROM json_each(?))`;
 
 /**
+ * A posts room's posts, its messages that aren't replies, by their latest activity: the id of a post's
+ * newest reply, or its own without one, newest first, the newest and the page before an activity as the
+ * timeline's pages are. Each groups the room's messages by post, every one of them, which suits a posts
+ * room's few, slow conversations rather than a busy room of chat.
+ */
+const POSTS_ACTIVITY = `SELECT coalesce(parent_id, id) AS post_id, max(id) AS active_id FROM messages WHERE room_id = ? GROUP BY post_id`;
+export const NEWEST_POSTS = `${POSTS_ACTIVITY} ORDER BY active_id DESC LIMIT ?`;
+export const POSTS_BEFORE = `${POSTS_ACTIVITY} HAVING max(id) < ? ORDER BY active_id DESC LIMIT ?`;
+
+/** The newest `POST_REPLIES_SHOWN` replies in each of the threads whose parents a JSON array lists. */
+const NEWEST_REPLIES_OF = `${SELECT_MESSAGES} WHERE room_id = ? AND id IN (
+    SELECT id FROM (
+      SELECT id, row_number() OVER (PARTITION BY parent_id ORDER BY id DESC) AS place FROM messages
+      WHERE parent_id IN (SELECT value FROM json_each(?))
+    ) WHERE place <= ${POST_REPLIES_SHOWN}
+  )`;
+
+/**
  * The longest row the search index keeps for a result to show, in UTF-16 code units: a row of Durable
  * Object SQLite takes 2 MB, and each unit takes at most 3 bytes of UTF-8, so this leaves room for the rest
  * of the index's row. A message with more, as one with many cards can have, goes without, and a search
@@ -449,6 +467,31 @@ export class MessageStore {
     const parent = await this.find(parentId);
     if (!parent || parent.parentId !== undefined) return { parent: null, messages: [], hasMore: false };
     return { parent, ...(await this.toPage(await this.db.all<MessageRow>(NEWEST_REPLIES, this.roomId, parentId, limit + 1), limit)) };
+  }
+
+  /**
+   * Up to `limit` of the room's posts whose latest activity came before `before`, or its newest without
+   * it, newest activity first, each with its newest replies, and whether there are older ones still.
+   */
+  async posts(limit: number, before?: string): Promise<{ posts: Post[]; hasMore: boolean }> {
+    const activity =
+      before === undefined
+        ? await this.db.all<{ post_id: string; active_id: string }>(NEWEST_POSTS, this.roomId, limit + 1)
+        : await this.db.all<{ post_id: string; active_id: string }>(POSTS_BEFORE, this.roomId, before, limit + 1);
+    const shown = activity.slice(0, limit);
+    const ids = JSON.stringify(shown.map((row) => row.post_id));
+    const [parents, replies] = await Promise.all([
+      this.db.all<MessageRow>(MESSAGES_WITH_IDS, this.roomId, ids).then((rows) => this.messagesOf(rows)),
+      this.db.all<MessageRow>(NEWEST_REPLIES_OF, this.roomId, ids).then((rows) => this.messagesOf(rows)),
+    ]);
+    const byId = new Map(parents.map((message) => [message.id, message]));
+    const posts = shown.flatMap(({ post_id, active_id }) => {
+      const message = byId.get(post_id);
+      if (!message) return [];
+      const shownReplies = replies.filter((reply) => reply.parentId === post_id).sort((a, b) => (a.id < b.id ? -1 : 1));
+      return [{ message, replies: shownReplies, activeId: active_id }];
+    });
+    return { posts, hasMore: activity.length > limit };
   }
 
   /** The newest `limit` replies in the thread of `parentId` older than `before`, oldest first. */

@@ -143,6 +143,7 @@ export function ThreadPanel({ room, name, me, parentId, replyId, frames, status,
             typing={typing}
             disabled={offline}
             threadId={parentId}
+            posts={room.kind !== "direct" && room.posts === true}
             onSend={thread.postReply}
             onSendFiles={(files, alsoSend) => void thread.postFiles(files, alsoSend)}
             onTyping={ignore}

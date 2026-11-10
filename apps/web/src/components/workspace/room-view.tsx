@@ -14,6 +14,7 @@ import type { RoomAnswer } from "@/lib/room-list";
 import { isPending } from "@/lib/room-state";
 import { Composer, RoomDeleted, type ComposerHandle } from "./composer";
 import { MessageList } from "./message-list";
+import { PostFeed } from "./post-feed";
 import { RoomHeader } from "./room-header";
 import { RoomNotice } from "./room-notice";
 import { ThreadPanel } from "./thread-panel";
@@ -62,6 +63,8 @@ export function RoomView({ room, messageId, threadId, replyId, invitation, onDis
   const nameOf = useNameOf();
   const name = roomName(room, me.id, nameOf);
   const direct = room.kind === "direct";
+  // A posts room shows its posts as a feed, newest activity first, under the composer that starts one.
+  const posts = room.kind !== "direct" && room.posts === true;
   useTitle(name);
   // The room shown is remembered, for home and Go Back to return to.
   useEffect(() => rememberLastRoom(room.id), [room.id]);
@@ -103,6 +106,30 @@ export function RoomView({ room, messageId, threadId, replyId, invitation, onDis
     if (newest && !isPending(newest)) editors.open(newest.id);
   };
 
+  // The composer: under the timeline, or above a posts room's feed, to start a post.
+  const composerShown = deleted ? (
+    <RoomDeleted />
+  ) : (
+    <Composer
+      ref={composer}
+      roomId={room.id}
+      roomName={name}
+      direct={direct}
+      posts={posts}
+      userId={me.id}
+      typing={typingUsers}
+      disabled={state.offline}
+      // Only while the room's first messages are on their way, not once it's been out of reach a while.
+      deferEditor={state.status === "connecting" && !state.offline}
+      // The thread open beside the room takes focus as it opens.
+      autoFocus={threadId === undefined}
+      onSend={postMessage}
+      onSendFiles={postFiles}
+      onTyping={typing}
+      onEditLastMessage={editLastMessage}
+    />
+  );
+
   return (
     <>
       {/* The room's header and messages, placed in the page's grid as if they were its own. */}
@@ -123,42 +150,41 @@ export function RoomView({ room, messageId, threadId, replyId, invitation, onDis
         {/* Backgrounds run under a landscape phone's notch; the room's contents stay clear of it. */}
         <MainContent className="relative flex min-h-0 min-w-0 flex-col bg-background pr-[env(safe-area-inset-right)] max-md:pl-[env(safe-area-inset-left)]">
           <RoomNotice notice={state.notice} onDismiss={dismissNotice} />
-          <MessageList
-            roomName={name}
-            direct={direct}
-            invitation={invitation}
-            onDismissInvitation={onDismissInvitation}
-            state={state}
-            me={me}
-            actions={deleted ? null : messageActions}
-            editing={editing}
-            editors={editors}
-            onLoadOlder={loadOlder}
-            onLoadNewer={loadNewer}
-            onJumpToNewest={() => jump(null)}
-            onDropFiles={(files) => composer.current?.addFiles(files)}
-            openThread={threadId}
-          />
-          {deleted ? (
-            <RoomDeleted />
+          {posts ? (
+            <>
+              {/* As wide as the feed's cards, with the room around them. */}
+              <div className="mx-auto w-full max-w-[800px]">{composerShown}</div>
+              <PostFeed
+                roomName={name}
+                frames={frames}
+                state={state}
+                me={me}
+                actions={deleted ? null : messageActions}
+                editing={editing}
+                editors={editors}
+                openThread={threadId}
+              />
+            </>
           ) : (
-            <Composer
-              ref={composer}
-              roomId={room.id}
-              roomName={name}
-              direct={direct}
-              userId={me.id}
-              typing={typingUsers}
-              disabled={state.offline}
-              // Only while the room's first messages are on their way, not once it's been out of reach a while.
-              deferEditor={state.status === "connecting" && !state.offline}
-              // The thread open beside the room takes focus as it opens.
-              autoFocus={threadId === undefined}
-              onSend={postMessage}
-              onSendFiles={postFiles}
-              onTyping={typing}
-              onEditLastMessage={editLastMessage}
-            />
+            <>
+              <MessageList
+                roomName={name}
+                direct={direct}
+                invitation={invitation}
+                onDismissInvitation={onDismissInvitation}
+                state={state}
+                me={me}
+                actions={deleted ? null : messageActions}
+                editing={editing}
+                editors={editors}
+                onLoadOlder={loadOlder}
+                onLoadNewer={loadNewer}
+                onJumpToNewest={() => jump(null)}
+                onDropFiles={(files) => composer.current?.addFiles(files)}
+                openThread={threadId}
+              />
+              {composerShown}
+            </>
           )}
         </MainContent>
       </div>

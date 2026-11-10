@@ -230,6 +230,11 @@ interface Props {
    * to the room is ticked for that, until they've gone.
    */
   threadId?: string;
+  /**
+   * Whether the room is a posts room: its composer starts a post, and a thread's replies stay in the
+   * thread, without Also send to the room.
+   */
+  posts?: boolean;
   /** Sends a message, its body markup, answering whether it went: one that didn't stays to be changed. */
   onSend: (body: string, alsoSend: boolean) => boolean;
   /** Sends files, each as a message of its own, before the message written with them. */
@@ -256,7 +261,7 @@ export interface ComposerHandle {
  * Files picked, pasted or dropped wait above the card to go with the next message. What's written is
  * kept as a draft until it's sent. A thread's has Also send to the room before Send.
  */
-export function Composer({ roomId, roomName, direct = false, userId, typing, disabled, deferEditor = false, threadId, onSend, onSendFiles, onTyping, onEditLastMessage, autoFocus = true, ref }: Props) {
+export function Composer({ roomId, roomName, direct = false, userId, typing, disabled, deferEditor = false, threadId, posts = false, onSend, onSendFiles, onTyping, onEditLastMessage, autoFocus = true, ref }: Props) {
   const editor = useRef<RichTextEditorHandle>(null);
   const form = useRef<HTMLFormElement>(null);
   const [toolbarOpen, setToolbarOpen] = useState(false);
@@ -277,7 +282,7 @@ export function Composer({ roomId, roomName, direct = false, userId, typing, dis
   const wasBlank = useRef(!draft);
   // Whether Quote wrote what the editor opens with, before it showed, so it takes focus as Quote has it do.
   const replied = useRef(false);
-  const placeholder = threadId !== undefined ? "Reply…" : `Message ${direct ? "" : "#"}${roomName}`;
+  const placeholder = threadId !== undefined ? "Reply…" : posts ? `Start a post in #${roomName}` : `Message ${direct ? "" : "#"}${roomName}`;
 
   // What's written changed, to `body`, or to nothing: the room hears whether you're typing, and it's kept.
   const wrote = (body: string | null) => {
@@ -479,7 +484,7 @@ export function Composer({ roomId, roomName, direct = false, userId, typing, dis
               <span className="sr-only">Rich text</span>
             </button>
             {/* For fingers, the box sits far enough into its label for a fingertip on it to land on the label. */}
-            {threadId !== undefined && (
+            {threadId !== undefined && !posts && (
               <label className="mr-2 ml-2.5 flex min-w-0 cursor-pointer items-center gap-[7px] text-[13px] leading-[18px] text-message-muted touch:ml-0 touch:min-h-11 touch:pl-3.5 touch:text-sm">
                 <input
                   type="checkbox"
