@@ -2,7 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   // Kept at the root, beside the workspace, so Deploy to Cloudflare finds it: the button renames the
   // Worker and the bucket here for each deployer.
-  "name": "ember",
+  "name": "pmpro-chat",
   "main": "apps/worker/src/index.ts",
   "compatibility_date": "2026-10-01",
   // Link previews fetch pages people name: this sends those fetches out over the public Internet even
@@ -59,7 +59,7 @@
 
   // The files people upload to rooms. Deploying binds the account's bucket of this name, and creates
   // it if there's none and the deploy's token may. `wrangler dev` keeps them on this machine.
-  "r2_buckets": [{ "binding": "FILES", "bucket_name": "ember" }],
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "pmpro-chat-files" }],
 
   // Cloudflare Email Service, which sends Ember's email from the address an administrator gives in
   // Membership. It delivers once the account is on Workers Paid and has a domain onboarded under Email
@@ -78,5 +78,5 @@
   // `pnpm run deploy` binds it only for "d1", making it first if the account has none of this name, and
   // applying apps/worker/migrations/ to it. `wrangler dev` keeps one on this machine, which
   // `pnpm --filter @ember/worker d1:migrate:local` migrates.
-  "d1_databases": [{ "binding": "DB", "database_name": "ember", "migrations_dir": "apps/worker/migrations" }]
+  "d1_databases": [{ "binding": "DB", "database_name": "pmpro-chat", "migrations_dir": "apps/worker/migrations" }]
 }
