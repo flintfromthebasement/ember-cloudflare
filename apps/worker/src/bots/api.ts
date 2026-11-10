@@ -417,7 +417,9 @@ async function bodyText(request: Request): Promise<string | null> {
  * `index` answers it: the newest 40, or the 40 before the message `?before` names or after the one
  * `?after` does, with how many the room has in `X-Total-Count` and a `Link` to the next page when the
  * room has more beyond this one. A message deleted but kept for its thread's replies has nothing to
- * read, so the page leaves it out, though the room still counts it and pages from it.
+ * read, so the page leaves it out, though the room still counts it and pages from it. A reply that wasn't
+ * also sent to the room isn't on the page, as it isn't in the room's timeline: `?thread` reads its thread
+ * (`listThread`).
  */
 async function listMessages(request: Request, env: Env, roomId: RoomId, key: string): Promise<Response> {
   const access = await botIn(env, roomId, key);

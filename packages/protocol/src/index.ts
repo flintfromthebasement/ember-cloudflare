@@ -2,6 +2,7 @@
 // object with a `type`, and what the API sends and takes. Keep this file dependency-free: the
 // worker and the web app both import it directly as TypeScript.
 
+import type { AgentProfile } from "./agents.ts";
 import type { AssistantSettings, YourAssistant } from "./assistant.ts";
 import type { Card } from "./cards.ts";
 import type { StoredFile } from "./files.ts";
@@ -99,11 +100,13 @@ export {
   CUSTOM_STYLES_PATH,
   EMAIL_SIGN_UP_PATH,
   emailSignUpLink,
+  huddlePath,
   INVITATION_PATH,
   invitationLink,
   isAppPage,
   KIND_SEGMENTS,
   MAX_ID_LENGTH,
+  NEW_AGENT_PATH,
   NEW_BOT_PATH,
   NEW_DIRECT_PATH,
   PASSWORD_RESET_PATH,
@@ -192,6 +195,11 @@ export interface DirectoryUser extends User {
   status: UserStatus;
   /** Their avatar, `/users/<token>/avatar?v=<version>`, whose address changes whenever they do, and @ember's with each release too. */
   avatarUrl: string;
+  /**
+   * Whether they're an AI agent, @ember or one an administrator made, which the Agent badge shows, even
+   * once it's deleted, as its answers stay. Left out for anyone else.
+   */
+  agent?: true;
 }
 
 /** What `GET /api/users` answers: everyone in the workspace, deactivated, banned and suspended people too. */
@@ -457,6 +465,12 @@ export interface Account {
    * modes. A slot without one shows its default.
    */
   navigationIcons: NavigationIcons;
+  /**
+   * Whether huddles are on, which an administrator turns on in Rooms and permissions by giving Ember the
+   * keys of the Realtime SFU app they run through. Off until one does, when no room's header has a
+   * huddle button.
+   */
+  huddles: boolean;
 }
 
 /** What `GET /api/account` answers for workspace settings. */
@@ -840,6 +854,8 @@ export interface PersonAnswer {
    * active who isn't a bot.
    */
   transferId?: string;
+  /** What an agent's page tells everyone of it, for an agent an administrator made, until it's deleted. */
+  agent?: AgentProfile;
 }
 
 /** You, as your profile shows you. */

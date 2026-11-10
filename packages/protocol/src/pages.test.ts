@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isAppPage, MAX_ID_LENGTH, threadPath, TRANSFER_PATH, transferLink, workspacePageOf } from "./index";
+import { huddlePath, isAppPage, MAX_ID_LENGTH, threadPath, TRANSFER_PATH, transferLink, workspacePageOf } from "./index";
 
 describe("Error pages", () => {
   it("names the pages the app shows, for the Worker to serve the app at", () => {
@@ -85,6 +85,20 @@ describe("Threads", () => {
   });
 });
 
+describe("Huddles", () => {
+  it("opens a room at its huddle's link, which offers to join its huddle", () => {
+    expect(workspacePageOf("/rooms/caf%C3%A9/huddle")).toEqual({ page: "room", roomId: "café", huddle: true });
+    expect(huddlePath("café")).toBe("/rooms/caf%C3%A9/huddle");
+    expect(workspacePageOf(huddlePath("a/b"))).toEqual({ page: "room", roomId: "a/b", huddle: true });
+    for (const path of ["/rooms/general/huddle/", "/rooms/general/huddle/extra", "/rooms/new/huddle", "/rooms/%FF/huddle", "/rooms/huddle/huddle/huddle"]) {
+      expect(isAppPage(path), path).toBe(false);
+    }
+    // A room can be named huddle, as it can be named anything but new.
+    expect(workspacePageOf("/rooms/huddle")).toEqual({ page: "room", roomId: "huddle" });
+    expect(workspacePageOf("/rooms/huddle/huddle")).toEqual({ page: "room", roomId: "huddle", huddle: true });
+  });
+});
+
 describe("Edit your profile", () => {
   it("shows your profile at anyone's profile address", () => {
     for (const path of ["/users/me/profile", "/users/01J9Z3/profile"]) expect(workspacePageOf(path), path).toEqual({ page: "profile" });
@@ -126,6 +140,18 @@ describe("Add and edit a bot", () => {
     expect(workspacePageOf("/account/bots/0mgk3x2a9b4c5e/edit")).toEqual({ page: "bot-settings", userId: "0mgk3x2a9b4c5e" });
     expect(workspacePageOf("/account/bots/caf%C3%A9/edit")).toEqual({ page: "bot-settings", userId: "café" });
     for (const path of ["/account/bots/new/", "/account/bots/%FF/edit", "/account/bots/0mgk3x2a9b4c5e/edit/extra", "/account/bots/0mgk3x2a9b4c5e/key"]) {
+      expect(workspacePageOf(path), path).toBeNull();
+    }
+  });
+});
+
+describe("New agent and an agent's settings", () => {
+  it("shows New agent at `/account/agents/new`, and an agent's settings, or @ember's, at `/account/agents/<id>/edit`", () => {
+    expect(workspacePageOf("/account/agents/new")).toEqual({ page: "new-agent" });
+    expect(workspacePageOf("/account/agents/0mgk3x2a9b4c5e/edit")).toEqual({ page: "agent-settings", agentId: "0mgk3x2a9b4c5e" });
+    expect(workspacePageOf("/account/agents/ember/edit")).toEqual({ page: "agent-settings", agentId: "ember" });
+    expect(workspacePageOf("/account/agents/caf%C3%A9/edit")).toEqual({ page: "agent-settings", agentId: "café" });
+    for (const path of ["/account/agents", "/account/agents/new/", "/account/agents/%FF/edit", "/account/agents/0mgk3x2a9b4c5e", "/account/agents/0mgk3x2a9b4c5e/edit/extra"]) {
       expect(workspacePageOf(path), path).toBeNull();
     }
   });

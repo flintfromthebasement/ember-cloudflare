@@ -1,16 +1,23 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { CloseCode, startingInvolvement, type Bot, type DirectoryUser, type DirectRoom, type Me, type Message, type Room, type RoomId, type RoomSettings, type SharedRoom, type SidebarRoom, type TimelinePage, type WorkspaceServerFrame, type WorkspaceSettings } from "@ember/protocol";
+import { CloseCode, startingInvolvement, type Account, type Bot, type DirectoryUser, type DirectRoom, type Me, type Message, type Room, type RoomId, type RoomSettings, type SharedRoom, type SidebarRoom, type TimelinePage, type WorkspaceServerFrame, type WorkspaceSettings } from "@ember/protocol";
+import type { AgentSettings } from "@ember/protocol/agents";
+import type { AssistantSettings } from "@ember/protocol/assistant";
 import { FlashProvider } from "@/components/flash";
+import { AccountContext } from "@/hooks/use-account";
 import { PushContext } from "@/hooks/use-push";
 import { navigate } from "@/hooks/use-route";
+import { joinHuddle } from "@/lib/huddle";
+import { endHuddle, joinedHuddle, showHuddle, type HuddleControls } from "@/lib/huddle-store";
 import { loadPage } from "@/lib/page";
 import { badgeTheApp } from "@/test-badge";
 import { PUSH_ON } from "@/test-push";
 import { Workspace, loadPageAhead } from "./workspace";
 
 vi.mock("@/lib/page", () => ({ loadPage: vi.fn() }));
+// A huddle's own tests join one. Here joining shows the tab as in the huddle, as a test has it.
+vi.mock("@/lib/huddle", () => ({ joinHuddle: vi.fn() }));
 
 const ada: Me = { id: "u1", name: "Ada", administrator: false };
 const rooms: SharedRoom[] = [
@@ -33,7 +40,7 @@ const roomList = (listed: Room[], favorites: RoomId[] = [], sharedOrder: RoomId[
 });
 const generalSettings: RoomSettings = { room: rooms[0]!, canAdminister: true, people: [{ ...ada, member: true }] };
 const workspaceSettings: WorkspaceSettings = {
-  account: { name: "Analytical Engines", tagline: "", hideTranslationButtons: true, customStyles: "", restrictRoomCreation: false, logo: null, customDomain: null, joinLink: true, openSignUp: false, memberfulJoin: false, memberfulSignIn: false, emailDomainSignUp: false, emailDomains: [], navigationIcons: {} },
+  account: { name: "Analytical Engines", tagline: "", hideTranslationButtons: true, customStyles: "", restrictRoomCreation: false, logo: null, customDomain: null, joinLink: true, openSignUp: false, memberfulJoin: false, memberfulSignIn: false, emailDomainSignUp: false, emailDomains: [], navigationIcons: {}, huddles: false },
   joinCode: "aB3d-Ef5h-iJ7k",
   canAdminister: false,
   memberfulSite: null,
@@ -122,20 +129,16 @@ class WorkspaceSocket extends QuietSocket {
   }
 }
 
-function showWorkspace(path = "/", me = ada) {
+/** The workspace at `path`, for `me`, in a workspace that's as one is before first run unless `account` says how it is. */
+function showWorkspace(path = "/", me = ada, account?: Account) {
   const [onAccountChanged, onSignOut, onSessionChanged] = [vi.fn(), vi.fn(), vi.fn()];
   history.replaceState(null, "", path);
+  const workspace = (
+    <Workspace me={me} workspaceName="Analytical Engines" onAccountChanged={onAccountChanged} onSignOut={onSignOut} onSessionChanged={onSessionChanged} />
+  );
   const { unmount } = render(
     <PushContext value={PUSH_ON}>
-      <FlashProvider workspace>
-        <Workspace
-          me={me}
-          workspaceName="Analytical Engines"
-          onAccountChanged={onAccountChanged}
-          onSignOut={onSignOut}
-          onSessionChanged={onSessionChanged}
-        />
-      </FlashProvider>
+      <FlashProvider workspace>{account ? <AccountContext value={account}>{workspace}</AccountContext> : workspace}</FlashProvider>
     </PushContext>,
   );
   return { onAccountChanged, onSignOut, onSessionChanged, unmount, user: userEvent.setup() };
@@ -1928,6 +1931,90 @@ describe("Chat bots page", () => {
   });
 });
 
+describe("Agent pages", () => {
+  const asAdministrator: Me = { ...ada, administrator: true };
+  /** Ember AI on GLM-4.7 Flash. */
+  const assistant: AssistantSettings = {
+    accountId: "0123456789abcdef0123456789abcdef",
+    model: "@cf/zai-org/glm-4.7-flash",
+    models: [{ id: "@cf/zai-org/glm-4.7-flash", name: "GLM-4.7 Flash", format: "chat" }],
+    most: { thinking: "high", length: "long" },
+    webTools: null,
+    instructions: "",
+    avatarUrl: "/users/ember.abc/avatar?v=20261101120000",
+    avatar: false,
+  };
+  const recap: AgentSettings = {
+    id: "a1",
+    name: "Recap",
+    bio: null,
+    role: "bot",
+    status: "active",
+    avatarUrl: "/users/a1/avatar?v=1",
+    description: "Sums up threads into decisions and to-dos.",
+    model: assistant.model,
+    modelName: "GLM-4.7 Flash",
+    webTools: [],
+    rooms: null,
+    instructions: "Sum up the conversation so far.",
+    format: "chat",
+    levels: { thinking: "low", length: "medium" },
+    avatar: false,
+    changedBy: { id: ada.id, name: ada.name },
+    changedAt: "2026-11-09T12:00:00.000Z",
+  };
+  /** What an administrator's workspace answers while Ember AI is on. */
+  const withAgents = (responses: Parameters<typeof serve>[0] = {}) =>
+    serve({
+      "GET /api/account": () => Response.json({ ...workspaceSettings, canAdminister: true, assistant }),
+      "GET /api/account/agents": () => Response.json({ agents: [recap] }),
+      "POST /api/account/assistant/catalog": () => Response.json({ models: assistant.models, refusal: null }),
+      ...responses,
+    });
+  const sectionMarked = () => within(screen.getByRole("navigation", { name: "Community settings" })).getByRole("link", { current: "page" });
+
+  it("shows the agents' pages at their addresses from the AI assistant tab, marking it, and Admin on the rail, with Go Back to it", async () => {
+    withAgents({ "GET /api/account/agents/a1": () => Response.json({ agent: recap }) });
+    const { user } = showWorkspace("/account/edit#assistant-settings", asAdministrator);
+    await user.click(await screen.findByRole("link", { name: "Edit Recap" }));
+    expect(await screen.findByRole("textbox", { name: "Name" })).toHaveValue("Recap");
+    expect(document.title).toBe("Edit agent");
+    expect(railCurrent()).toEqual(["Admin"]);
+    expect(sectionMarked()).toHaveTextContent("AI assistant");
+
+    await user.click(screen.getByRole("link", { name: "Go Back" }));
+    await user.click(await screen.findByRole("link", { name: "Edit Ember" }));
+    expect(await screen.findByRole("region", { name: "@ember" })).toBeInTheDocument();
+    expect(railCurrent()).toEqual(["Admin"]);
+    expect(sectionMarked()).toHaveTextContent("AI assistant");
+
+    await user.click(screen.getByRole("link", { name: "Go Back" }));
+    await user.click(await screen.findByRole("link", { name: "New agent" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "New agent" })).toBeInTheDocument();
+    expect(document.title).toBe("New agent");
+    await user.click(screen.getByRole("link", { name: "Go Back" }));
+    expect(await screen.findByRole("region", { name: "Agents" })).toBeInTheDocument();
+  });
+
+  it("loads an agent's settings again when no agent has the id, for the Worker to answer the 404 page", async () => {
+    vi.mocked(loadPage).mockClear();
+    withAgents({ "GET /api/account/agents/nobody": () => Response.json({ error: "Not found" }, { status: 404 }) });
+    showWorkspace("/account/agents/nobody/edit", asAdministrator);
+    await waitFor(() => expect(loadPage).toHaveBeenCalledExactlyOnceWith("/account/agents/nobody/edit"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("sends a member from New agent, or @ember's page, to workspace settings, saying why", async () => {
+    for (const path of ["/account/agents/new", "/account/agents/ember/edit"]) {
+      const { unmount } = showWorkspace(path);
+      expect(await screen.findByRole("alert")).toHaveTextContent("Only administrators can set up agents");
+      expect(location.pathname).toBe("/account/edit");
+      expect(await communitySettings()).toBeInTheDocument();
+      unmount();
+    }
+  });
+});
+
 describe("App icon badge", () => {
   it("badges the app with Activity's count, the conversations marked unread but the one shown, as it changes, and clears the badge at none", async () => {
     const badges = badgeTheApp();
@@ -2038,5 +2125,245 @@ describe("Conversations drawer on phones", () => {
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     await waitFor(() => expect(screen.getByRole("button", { name: "Open navigation" })).toHaveFocus());
+  });
+});
+
+describe("Huddles", () => {
+  const HUDDLES_ON: Account = { ...workspaceSettings.account, huddles: true };
+  const preview = () => screen.queryByRole("dialog", { name: /huddle in/ });
+  const bar = () => screen.queryByRole("region", { name: /^Huddle/ });
+  /** What the tab's huddle is asked to do. */
+  const controls = { leave: vi.fn(() => showHuddle(null)), setMuted: vi.fn() } satisfies HuddleControls;
+  /** Serves `sidebar` as this person's rooms, and a search that finds nothing, as the search box and its page ask. */
+  const serveRooms = (sidebar: object = roomList(rooms)) =>
+    serve({
+      "GET /api/sidebar": () => Response.json(sidebar),
+      "GET /api/searches?q=": () => Response.json({ search: null, matches: [], next: null, rooms: [], recent: [] }),
+    });
+
+  beforeEach(() => {
+    vi.stubGlobal("WebSocket", WorkspaceSocket);
+    serveRooms();
+    controls.leave.mockClear();
+    controls.setMuted.mockClear();
+    // Joining lets the tab into the huddle at once, alone.
+    vi.mocked(joinHuddle).mockImplementation(({ roomId, muted }) =>
+      showHuddle({ roomId, connected: true, you: ada, people: [{ user: ada, muted, audio: false }], muted, microphone: true }, controls),
+    );
+  });
+
+  afterEach(() => {
+    act(() => showHuddle(null));
+    vi.mocked(joinHuddle).mockReset();
+  });
+
+  it("has no huddle button until huddles are on", async () => {
+    showWorkspace("/rooms/general");
+    await roomHeading();
+    expect(screen.queryByRole("button", { name: /huddle/i })).not.toBeInTheDocument();
+  });
+
+  it("has none in a DM", async () => {
+    serveRooms(roomList([...rooms, withGrace]));
+    showWorkspace("/rooms/d1", ada, HUDDLES_ON);
+    expect(await roomHeading()).toHaveTextContent("Grace");
+    expect(screen.queryByRole("button", { name: /huddle/i })).not.toBeInTheDocument();
+  });
+
+  it("starts a room's huddle from its header by the preview, then shows its bar under every page until it's left", async () => {
+    const { user } = showWorkspace("/rooms/general", ada, HUDDLES_ON);
+    await roomHeading();
+    // First of the room's actions, where Slack's is.
+    const start = screen.getByRole("button", { name: "Start huddle" });
+    expect(start.compareDocumentPosition(screen.getByRole("link", { name: "Search messages" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await user.click(start);
+    expect(await screen.findByRole("dialog", { name: "Start a huddle in general" })).toBeVisible();
+    expect(bar()).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Start Huddle" }));
+    expect(joinHuddle).toHaveBeenCalledExactlyOnceWith({ roomId: "general", muted: false, microphone: null, speakerId: "" });
+    expect(preview()).not.toBeInTheDocument();
+    expect(bar()).toHaveAccessibleName("Huddle in general");
+    expect(screen.getByRole("button", { name: "Leave huddle" })).toBeInTheDocument();
+
+    // On another room's page, and a page that isn't a room's.
+    act(() => navigate("/rooms/random"));
+    expect(await roomHeading()).toHaveTextContent("random");
+    expect(bar()).toHaveAccessibleName("Huddle in general");
+    expect(screen.getByRole("button", { name: "Start huddle" })).toBeInTheDocument();
+    act(() => navigate("/searches"));
+    expect(await screen.findByRole("heading", { name: "Find a conversation" })).toBeInTheDocument();
+    expect(bar()).toHaveAccessibleName("Huddle in general");
+    await user.click(within(bar()!).getByRole("link"));
+    expect(await roomHeading()).toHaveTextContent("general");
+
+    await user.click(within(bar()!).getByRole("button", { name: "Leave" }));
+    expect(controls.leave).toHaveBeenCalledTimes(1);
+    expect(bar()).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start huddle" })).toBeInTheDocument();
+  });
+
+  it("leaves from the header's button while the tab is in the room's huddle", async () => {
+    const { user } = showWorkspace("/rooms/general", ada, HUDDLES_ON);
+    await roomHeading();
+    act(() => joinHuddle({ roomId: "general", muted: false, microphone: null, speakerId: "" }));
+    await user.click(screen.getByRole("button", { name: "Leave huddle" }));
+    expect(controls.leave).toHaveBeenCalledTimes(1);
+    expect(preview()).not.toBeInTheDocument();
+  });
+
+  it("offers to join a huddle the workspace socket says is going on, with how many are in it", async () => {
+    const { user } = showWorkspace("/rooms/general", ada, HUDDLES_ON);
+    await roomHeading();
+    await workspaceSends({ type: "room.huddle", roomId: "general", huddle: { startedAt: "2026-11-10T09:00:00.000Z", userIds: ["u2", "u3"] } });
+    await user.click(await screen.findByRole("button", { name: "Join huddle, 2 in it" }));
+    expect(await screen.findByRole("dialog", { name: "Join the huddle in general" })).toHaveAccessibleDescription("2 people are in it now.");
+    // It follows the huddle while it's open.
+    await workspaceSends({ type: "room.huddle", roomId: "general", huddle: null });
+    expect(await screen.findByRole("dialog", { name: "Start a huddle in general" })).toBeVisible();
+  });
+
+  it("lists the huddles going on as the sidebar loads them", async () => {
+    serveRooms({ ...roomList(rooms), huddles: { random: { startedAt: "2026-11-10T09:00:00.000Z", userIds: ["u2"] } } });
+    showWorkspace("/rooms/random", ada, HUDDLES_ON);
+    expect(await screen.findByRole("button", { name: "Join huddle, 1 in it" })).toBeInTheDocument();
+  });
+
+  it("opens the preview from a huddle's link, and leaves the room's address in its place", async () => {
+    vi.mocked(loadPage).mockClear();
+    showWorkspace("/rooms/random/huddle", ada, HUDDLES_ON);
+    expect(await screen.findByRole("dialog", { name: "Start a huddle in random" })).toBeVisible();
+    // The room is under the preview, which hides it from screen readers meanwhile.
+    expect(screen.getByRole("heading", { level: 1, hidden: true })).toHaveTextContent("random");
+    expect(location.pathname).toBe("/rooms/random");
+    expect(loadPage).not.toHaveBeenCalled();
+  });
+
+  it("shows the room at its huddle's link, and says so, while huddles are off", async () => {
+    showWorkspace("/rooms/random/huddle");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Huddles are turned off.");
+    expect(await roomHeading()).toHaveTextContent("random");
+    expect(location.pathname).toBe("/rooms/random");
+    expect(preview()).not.toBeInTheDocument();
+  });
+
+  it("only shows the room at the link of a huddle the tab is in, or of a DM", async () => {
+    serveRooms(roomList([...rooms, withGrace]));
+    act(() => joinHuddle({ roomId: "random", muted: false, microphone: null, speakerId: "" }));
+    showWorkspace("/rooms/random/huddle", ada, HUDDLES_ON);
+    expect(await roomHeading()).toHaveTextContent("random");
+    await waitFor(() => expect(location.pathname).toBe("/rooms/random"));
+    act(() => navigate("/rooms/d1/huddle"));
+    expect(await roomHeading()).toHaveTextContent("Grace");
+    await waitFor(() => expect(location.pathname).toBe("/rooms/d1"));
+    expect(preview()).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("goes home from the huddle's link of a room that isn't this person's", async () => {
+    showWorkspace("/rooms/secret/huddle", ada, HUDDLES_ON);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Room not found or inaccessible");
+    expect(preview()).not.toBeInTheDocument();
+  });
+
+  it("starts, joins and leaves on Ctrl+Alt+Shift+H, which a dialog keeps", async () => {
+    const { user } = showWorkspace("/rooms/random", ada, HUDDLES_ON);
+    await roomHeading();
+    const toggle = (target: Element = document.body) => fireEvent.keyDown(target, { key: "H", code: "KeyH", ctrlKey: true, altKey: true, shiftKey: true });
+    expect(toggle()).toBe(false);
+    const dialog = await screen.findByRole("dialog", { name: "Start a huddle in random" });
+    // In the preview, as in any dialog, the keys do nothing.
+    expect(toggle(within(dialog).getByRole("button", { name: "Start Huddle" }))).toBe(true);
+    expect(joinHuddle).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole("button", { name: "Start Huddle" }));
+    expect(bar()).toHaveAccessibleName("Huddle in random");
+
+    // Wherever the tab is, they leave the huddle it's in.
+    act(() => navigate("/rooms/general"));
+    expect(await roomHeading()).toHaveTextContent("general");
+    expect(toggle()).toBe(false);
+    expect(controls.leave).toHaveBeenCalledTimes(1);
+    expect(bar()).not.toBeInTheDocument();
+    expect(preview()).not.toBeInTheDocument();
+  });
+
+  it("leaves the huddle's keys alone where there's no huddle to start: with huddles off, in a DM, and off a room's page", async () => {
+    serveRooms(roomList([...rooms, withGrace]));
+    const toggle = () => fireEvent.keyDown(document.body, { key: "H", code: "KeyH", ctrlKey: true, altKey: true, shiftKey: true });
+    const off = showWorkspace("/rooms/general");
+    await roomHeading();
+    expect(toggle()).toBe(true);
+    off.unmount();
+
+    showWorkspace("/rooms/d1", ada, HUDDLES_ON);
+    expect(await roomHeading()).toHaveTextContent("Grace");
+    expect(toggle()).toBe(true);
+    act(() => navigate("/searches"));
+    expect(toggle()).toBe(true);
+    expect(preview()).not.toBeInTheDocument();
+  });
+
+  it("mutes and unmutes on Ctrl+Shift+Space while the tab is in a huddle, even from a dialog, and leaves the keys alone otherwise", async () => {
+    const { user } = showWorkspace("/rooms/general", ada, HUDDLES_ON);
+    await roomHeading();
+    const mute = (target: Element = document.body) => fireEvent.keyDown(target, { key: " ", code: "Space", ctrlKey: true, shiftKey: true });
+    expect(mute()).toBe(true);
+    expect(controls.setMuted).not.toHaveBeenCalled();
+
+    act(() => joinHuddle({ roomId: "general", muted: false, microphone: null, speakerId: "" }));
+    expect(mute()).toBe(false);
+    expect(controls.setMuted).toHaveBeenLastCalledWith(true);
+    act(() => showHuddle({ ...joinedHuddle()!, muted: true }));
+    await user.click(screen.getByRole("link", { name: "Search messages" }));
+    expect(mute(screen.getByRole("combobox", { name: "Search" }))).toBe(false);
+    expect(controls.setMuted).toHaveBeenLastCalledWith(false);
+  });
+
+  it("counts the huddle's keys once however long they're held: muting stays, and leaving starts nothing", async () => {
+    showWorkspace("/rooms/general", ada, HUDDLES_ON);
+    await roomHeading();
+    const mute = { key: " ", code: "Space", ctrlKey: true, shiftKey: true };
+    const toggle = { key: "H", code: "KeyH", ctrlKey: true, altKey: true, shiftKey: true };
+    /** The keys pressed and held, as the browser repeats them: whether it was left any of them to act on. */
+    const held = (keys: KeyboardEventInit) => [fireEvent.keyDown(document.body, keys), fireEvent.keyDown(document.body, { ...keys, repeat: true }), fireEvent.keyDown(document.body, { ...keys, repeat: true })].some(Boolean);
+
+    act(() => joinHuddle({ roomId: "general", muted: false, microphone: null, speakerId: "" }));
+    expect(held(mute)).toBe(false);
+    expect(controls.setMuted).toHaveBeenCalledExactlyOnceWith(true);
+
+    expect(held(toggle)).toBe(false);
+    expect(controls.leave).toHaveBeenCalledTimes(1);
+    expect(bar()).not.toBeInTheDocument();
+    expect(preview()).not.toBeInTheDocument();
+  });
+
+  it("says why the room ended the tab's huddle", async () => {
+    showWorkspace("/rooms/general", ada, HUDDLES_ON);
+    await roomHeading();
+    act(() => joinHuddle({ roomId: "general", muted: false, microphone: null, speakerId: "" }));
+    expect(bar()).toBeInTheDocument();
+    act(() => endHuddle("Huddles have been turned off."));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Huddles have been turned off.");
+    expect(bar()).not.toBeInTheDocument();
+  });
+
+  it("closes the preview of a room that stops being this person's, for good", async () => {
+    const { user } = showWorkspace("/rooms/general", ada, HUDDLES_ON);
+    await roomHeading();
+    await user.click(screen.getByRole("button", { name: "Start huddle" }));
+    expect(await screen.findByRole("dialog", { name: "Start a huddle in general" })).toBeVisible();
+    await workspaceSends({ type: "room.gone", roomId: "general" });
+    await waitFor(() => expect(preview()).not.toBeInTheDocument());
+    await workspaceSends({ type: "room.saved", room: rooms[0]! });
+    await waitFor(() => expect(sidebarRooms()).toContain("general"));
+    expect(preview()).not.toBeInTheDocument();
+  });
+
+  it("leaves the huddle as the workspace goes, as when someone else signs in", async () => {
+    const { unmount } = showWorkspace("/rooms/general", ada, HUDDLES_ON);
+    await roomHeading();
+    act(() => joinHuddle({ roomId: "general", muted: false, microphone: null, speakerId: "" }));
+    unmount();
+    expect(controls.leave).toHaveBeenCalledTimes(1);
   });
 });
