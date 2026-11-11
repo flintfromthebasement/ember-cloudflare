@@ -129,6 +129,7 @@ scratchpad, make the change (for example `PATCH /api/rooms/<id>` with `{"posts":
 | — Posts rooms: Facebook-group-style feed, comments two levels deep, post icon, only-admins-post setting | `posts-rooms` | Not proposed upstream yet: open an issue first. Merged into `pmpro` and live since 2026-11-10 |
 | [#285](https://github.com/NYLLON-SOFTWARE/ember-cloudflare/pull/285) Quote line by line in the composer, as Slack does | `composer-quotes` | Open; merged into `pmpro` |
 | — A hand cursor over everything that can be pressed | `pointer-cursors` | Upstream candidate, not proposed yet; merged into `pmpro` |
+| — Preview a message's link after it's sent, when the composer didn't | `server-link-previews` | Upstream candidate, not proposed yet; merged into `pmpro` and live since 2026-11-10 |
 
 `pmpro` also carries `f351abf2`, an early draft of #273 that the PR replaced. Drop it at the next
 sync if it conflicts. Update this table whenever a PR opens, merges or closes.
