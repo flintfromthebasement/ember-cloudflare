@@ -1,7 +1,7 @@
 import { useId, useMemo } from "react";
 import type { Me, RoomId, SharedRoom } from "@ember/protocol";
 import { DotsGrid3x3 } from "@/components/icons/iconoir";
-import { RoomIcon } from "@/components/icons/room-icon";
+import { RoomIcon, shownRoomIcon } from "@/components/icons/room-icon";
 import { PageLink } from "@/components/page-link";
 import { roomSettingsPath, WORKSPACE_SETTINGS_PATH } from "@/hooks/use-route";
 import { useSharedOrder } from "@/hooks/use-shared-order";
@@ -93,7 +93,7 @@ export function RoomOrder({ rooms, sharedOrder, onSaved, onSessionChanged }: Pro
                 aria-label={`Settings for ${room.name}`}
                 className="group flex min-w-0 flex-1 items-center gap-2.5 self-stretch"
               >
-                <RoomIcon icon={room.icon} size={19} className="w-[18px] shrink-0 text-center text-[22px] leading-none text-muted-foreground" />
+                <RoomIcon icon={shownRoomIcon(room)} size={19} className="w-[18px] shrink-0 text-center text-[22px] leading-none text-muted-foreground" />
                 <span className="min-w-0 truncate group-hover:underline">{room.name}</span>
                 <span className="ml-auto shrink-0 rounded-full border bg-hover px-2 py-[3px] text-[11px] whitespace-nowrap text-muted-foreground">
                   {room.kind === "closed" ? "Selected people" : "Everyone"}

@@ -409,10 +409,12 @@ interface Props {
   disabled?: boolean;
   /** Where the catalog comes from. */
   catalogUrl?: string;
+  /** The icon the room has without one chosen, as a posts room has its own, or null for `#`. */
+  defaultIcon?: RoomIconName | null;
 }
 
 /** The room's icon, with a button that opens the dialog to choose another. */
-export function IconPicker({ icon, onChange, disabled = false, catalogUrl }: Props) {
+export function IconPicker({ icon, onChange, disabled = false, catalogUrl, defaultIcon = null }: Props) {
   const dialog = useRef<IconDialogHandle>(null);
   return (
     <div className="mt-[22px] flex min-w-0 flex-col gap-[7px] text-start">
@@ -420,11 +422,11 @@ export function IconPicker({ icon, onChange, disabled = false, catalogUrl }: Pro
         <span className="flex items-center gap-2 text-[13px] font-[550]">Room icon</span>
         <IconTrigger
           label="Choose room icon"
-          preview={<RoomIcon icon={icon} size={23} />}
-          title={roomIconLabel(icon)}
+          preview={<RoomIcon icon={icon ?? defaultIcon} size={23} />}
+          title={icon === null && defaultIcon !== null ? "Posts" : roomIconLabel(icon)}
           subtitle="Choose from Lucide and Iconoir"
           disabled={disabled}
-          onOpen={(trigger) => dialog.current?.open({ icon, defaultIcon: null, defaultLabel: "Default hashtag", apply: onChange, trigger })}
+          onOpen={(trigger) => dialog.current?.open({ icon, defaultIcon, defaultLabel: defaultIcon === null ? "Default hashtag" : "Default for posts", apply: onChange, trigger })}
         />
       </div>
       <p className="mt-2 text-xs text-muted-foreground">Shown beside this room for everyone in the workspace.</p>

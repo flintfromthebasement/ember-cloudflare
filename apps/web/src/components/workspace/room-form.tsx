@@ -5,6 +5,7 @@ import { CheckCircle, Community } from "@/components/icons/iconoir";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { POSTS_ROOM_ICON } from "@/components/icons/room-icon";
 import { IconPicker } from "./icon-picker";
 import { ListRow, ListSeparator } from "./list-row";
 import { AvatarLink } from "./user-avatar";
@@ -65,7 +66,7 @@ export function RoomForm<Person extends User>({ canAdminister, name, onNameChang
         <h2 className="text-[24px] font-bold wrap-anywhere max-md:text-[22px]">{name}</h2>
       )}
 
-      {canAdminister && <IconPicker icon={icon} onChange={onIconChange} disabled={saving} />}
+      {canAdminister && <IconPicker icon={icon} onChange={onIconChange} disabled={saving} defaultIcon={posts ? POSTS_ROOM_ICON : null} />}
       {canAdminister && <PostsSwitch posts={posts} onChange={onPostsChange} disabled={saving} />}
 
       {/* Saving sends who the switches showed when Save was pressed, so they wait until it's done. */}

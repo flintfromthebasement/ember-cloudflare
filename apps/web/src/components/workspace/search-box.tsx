@@ -17,7 +17,7 @@ import {
   type UserId,
 } from "@ember/protocol";
 import { AtSign, Attachment, ChatBubbleEmpty, ClockRotateRight, FilterList, Hashtag, Link, MessageText, Plus, Search as SearchIcon, Trash, User as UserIcon, Xmark } from "@/components/icons/iconoir";
-import { RoomIcon } from "@/components/icons/room-icon";
+import { RoomIcon, shownRoomIcon } from "@/components/icons/room-icon";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { PeopleContext, useNameOf } from "@/hooks/use-directory";
 import { useMounted } from "@/hooks/use-mounted";
@@ -119,7 +119,7 @@ export function RoomMark({ room, size }: { room: Room | null; size: number }) {
   if (room?.kind === "direct") return <ChatBubbleEmpty className="shrink-0" style={{ width: size, height: size }} />;
   return (
     <span aria-hidden className="inline-flex shrink-0 items-center leading-none" style={{ fontSize: size }}>
-      <RoomIcon icon={room?.icon ?? null} size={size} />
+      <RoomIcon icon={shownRoomIcon(room)} size={size} />
     </span>
   );
 }
