@@ -126,7 +126,9 @@ scratchpad, make the change (for example `PATCH /api/rooms/<id>` with `{"posts":
 |---|---|---|
 | [#273](https://github.com/NYLLON-SOFTWARE/ember-cloudflare/pull/273) Let bots read a thread | `bot-thread-read` | Open, no review yet; merged into `pmpro` |
 | [#274](https://github.com/NYLLON-SOFTWARE/ember-cloudflare/pull/274) Give bots the files people post | `bot-attachments` | Open, no review yet; merged into `pmpro` |
-| — Posts rooms (forum-style rooms, newest activity first) | `posts-rooms` | Not proposed upstream yet: open an issue first. Merged into `pmpro` and live since 2026-11-10 |
+| — Posts rooms: Facebook-group-style feed, comments two levels deep, post icon, only-admins-post setting | `posts-rooms` | Not proposed upstream yet: open an issue first. Merged into `pmpro` and live since 2026-11-10 |
+| [#285](https://github.com/NYLLON-SOFTWARE/ember-cloudflare/pull/285) Quote line by line in the composer, as Slack does | `composer-quotes` | Open; merged into `pmpro` |
+| — A hand cursor over everything that can be pressed | `pointer-cursors` | Upstream candidate, not proposed yet; merged into `pmpro` |
 
 `pmpro` also carries `f351abf2`, an early draft of #273 that the PR replaced. Drop it at the next
 sync if it conflicts. Update this table whenever a PR opens, merges or closes.
