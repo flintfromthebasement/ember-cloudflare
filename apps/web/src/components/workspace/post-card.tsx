@@ -259,10 +259,11 @@ function CommentBox({ roomId, postId, me, frames, autoFocus }: { roomId: string;
     return (
       <div className="mx-5 flex items-center gap-2 py-1 max-md:mx-3">
         <UserAvatar user={me} className="size-8 flex-none rounded-full" />
+        {/* It looks and reads as the field it becomes, so it has a text cursor. */}
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="min-h-9 flex-1 rounded-full border bg-background px-3.5 text-start text-sm text-muted-foreground hover:border-message-border touch:min-h-11"
+          className="min-h-9 flex-1 cursor-text rounded-full border bg-background px-3.5 text-start text-sm text-muted-foreground hover:border-message-border touch:min-h-11"
         >
           Write a comment…
         </button>
