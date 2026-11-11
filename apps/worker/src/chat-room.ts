@@ -26,7 +26,7 @@ import {
   type UserId,
 } from "@ember/protocol";
 import { parseHuddleSocketParams } from "@ember/protocol/huddles";
-import { prepareBody, userIdFromSgid, userIdsIn, type PreparedBody } from "@ember/richtext";
+import { linkedUrls, OPENGRAPH_EMBED_CONTENT_TYPE, prepareBody, userIdFromSgid, userIdsIn, type PreparedBody } from "@ember/richtext";
 import {
   AGENT_NOTES,
   AnswerError,
@@ -61,7 +61,7 @@ import { RoomLog } from "./room-log";
 import { searchIndex } from "./search-index";
 import { CLOSE_REASONS, closedAtOnce, closeTooLarge, isTooLarge, MAX_ROOM_FRAME_SIZE, RESERVED_CLOSE_CODES } from "./sockets";
 import { MessageStore, type Deletion, type InThread, type PageCursor, type PostedFile, type StoredBody } from "./store";
-import { unfurler } from "./unfurl";
+import { isOnHost, unfurler } from "./unfurl";
 import { viewersOf, type Viewing } from "./viewing";
 import { workspace, type AssistantAccess, type BotAccess, type WebhookAccess } from "./workspace";
 import type { AssistantAsk, MessagePush, MessageWebhook } from "./workspace-store";
@@ -79,6 +79,8 @@ interface Attachment extends Viewing {
   typing?: true;
   /** Set in a posts room where only its admins start posts, for someone who isn't one, who comments and replies only. */
   postsBlocked?: true;
+  /** The host the tab reaches Ember at, whose links the room doesn't preview. Absent on sockets let in before the room kept it. */
+  host?: string;
 }
 
 export const USER_HEADER = "X-Ember-User";
@@ -169,6 +171,9 @@ const WEBHOOKS_WAITING = 1024;
 const NO_WEBHOOK = "the bot has been deleted, has left the room or has no webhook";
 /** Why the room posts nothing of what a bot says back: it was deleted or left the room, or its webhook changed, while the delivery ran. */
 const WEBHOOK_CHANGED = "the bot has been deleted, has left the room or its webhook has changed";
+/** Whether a message has a link's preview, which the composer writes as an Open Graph embed. */
+const hasPreview = (message: Message) => message.body.includes(OPENGRAPH_EMBED_CONTENT_TYPE);
+
 /** Why the room posts nothing of what a bot says back to a reply in a thread: the thread's message was deleted while the delivery ran. */
 const THREAD_GONE = "the thread's message has been deleted";
 
@@ -288,7 +293,8 @@ export class ChatRoom extends DurableObject<Env> {
       if (refused) return closedAtOnce(CloseCode.Reconnect);
       const { 0: client, 1: server } = new WebSocketPair();
       this.ctx.acceptWebSocket(server, tags);
-      server.serializeAttachment({ user, roomId, visible, protocol, heardAt: Date.now(), ...(banned && { banned }), ...(postsBlocked && { postsBlocked }) } satisfies Attachment);
+      const host = urlOf(request).host;
+      server.serializeAttachment({ user, roomId, visible, protocol, heardAt: Date.now(), host, ...(banned && { banned }), ...(postsBlocked && { postsBlocked }) } satisfies Attachment);
 
       this.send(server, { ...opening, you: user, present: this.present() });
       // A tab running an older app hears at once that it has to reload, rather than once it sends something.
@@ -835,9 +841,10 @@ export class ChatRoom extends DurableObject<Env> {
         }
         const body = await this.prepare(frame.body);
         if (typeof body === "string") return this.send(ws, { type: "error", message: body, clientMessageId: frame.clientMessageId, failed: frame.type });
-        await this.create(store, user, frame.clientMessageId, body, now, { inThread });
+        const created = await this.create(store, user, frame.clientMessageId, body, now, { inThread });
         // Everyone else takes the message as its author's stop.
         markTyping(ws, false);
+        this.previewLater(store.roomId, created, ws);
         return;
       }
       case "message.update": {
@@ -847,7 +854,7 @@ export class ChatRoom extends DurableObject<Env> {
         if (message.cards) return this.send(ws, { type: "error", message: HAS_CARDS, failed: frame.type });
         const body = await this.prepare(frame.body);
         if (typeof body === "string") return this.send(ws, { type: "error", message: body, failed: frame.type });
-        await this.edit(store, message, body, now);
+        this.previewLater(store.roomId, await this.edit(store, message, body, now), ws);
         return;
       }
       case "message.delete": {
@@ -1397,9 +1404,45 @@ export class ChatRoom extends DurableObject<Env> {
     return unfurler(this.env)
       .unfurl(url)
       .catch((error: unknown) => {
-        console.error("Could not unfurl the link in Ember AI's answer", error);
+        console.error("Could not unfurl a link", error);
         return null;
       });
+  }
+
+  /**
+   * Previews the first link in `message`, as the composer does below a link pasted into it, when it has no
+   * preview: the composer has none for a link typed rather than pasted, nor one sent before its preview
+   * came, nor one from a phone's share sheet. It goes on after the message has gone, as Slack's do, and
+   * leaves links to Ember itself, at the host `ws` reaches it at, as the composer does.
+   */
+  private previewLater(roomId: RoomId, message: Message, ws: WebSocket): void {
+    if (message.cards || message.attachment || message.deleted || hasPreview(message)) return;
+    const { host } = ws.deserializeAttachment() as Attachment;
+    const links = linkedUrls(message.plainText).filter((link) => !isOnHost(link, host ? [host] : []));
+    if (links.length === 0) return;
+    this.ctx.waitUntil(this.addPreview(roomId, message.id, links).catch((error: unknown) => console.error("Could not preview a message's link", error)));
+  }
+
+  /**
+   * Adds the preview of the first of `links` not at one of Ember's own addresses below message `messageId`,
+   * unless it's gone, has one by then, or no longer links there.
+   */
+  private async addPreview(roomId: RoomId, messageId: string, links: string[]): Promise<void> {
+    const own = await workspace(this.env).ownAddresses();
+    const url = links.find((link) => !isOnHost(link, own));
+    if (url === undefined) return;
+    const preview = await this.previewOf(url);
+    if (!preview) return;
+    await this.serially(async () => {
+      const store = this.storeFor(roomId);
+      const message = await this.findUndeleted(store, messageId);
+      if (!message || message.cards || hasPreview(message) || !linkedUrls(message.plainText).includes(url)) return;
+      const body = await this.prepare(`${message.body}${previewAttachment(preview)}`);
+      if (typeof body === "string") return;
+      const { message: previewed, seq } = await store.addPreview(message, body);
+      this.broadcast({ type: "message.updated", message: previewed, seq });
+      this.couriersFor(roomId).index.deliver();
+    });
   }
 
   /**

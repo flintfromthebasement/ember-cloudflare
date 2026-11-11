@@ -720,6 +720,28 @@ export class MessageStore {
    * when that's its file's name, as a file message's is, and then its thread's replies, which show it,
    * are logged for the search index with it.
    */
+  /**
+   * Gives `message` `body`, its text with a link's preview below it, as the room adds one after it's sent,
+   * which isn't an edit: it keeps when it was last edited.
+   */
+  async addPreview(message: Message, body: PreparedBody): Promise<{ message: Message; seq: number }> {
+    const now = new Date().toISOString();
+    const seq = await this.change((seq) => [
+      statement(
+        `UPDATE messages SET body = ?, plain_text = ?, mentions = ?, updated_at = ?, change_seq = ? WHERE room_id = ? AND id = ?`,
+        body.html,
+        body.plainText,
+        JSON.stringify(body.mentions),
+        now,
+        seq,
+        this.roomId,
+        message.id,
+      ),
+      logIndexing(this.roomId, message.id),
+    ]);
+    return { message: { ...message, body: body.html, plainText: body.plainText, mentions: body.mentions, updatedAt: now }, seq };
+  }
+
   async updateAttachment(message: Message, posted: PostedFile | null, now: string): Promise<{ message: Message; seq: number }> {
     const plainText = message.body === "" && !message.cards ? (posted?.file.name ?? "") : message.plainText;
     const seq = await this.change((seq) => [
