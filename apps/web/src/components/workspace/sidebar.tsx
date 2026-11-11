@@ -151,7 +151,6 @@ export function Sidebar({
                   ROW,
                   "[-webkit-touch-callout:none]",
                   unread && "font-[650]",
-                  star && "cursor-grab",
                   room.id === moving && "relative z-[1] cursor-grabbing bg-background! shadow-[0_4px_14px_var(--color-drag-shadow)] outline outline-muted-foreground",
                 )}
               >

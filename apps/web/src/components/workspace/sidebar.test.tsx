@@ -271,8 +271,9 @@ describe("Reorder starred rooms", () => {
       "Alt+ArrowUp Alt+ArrowDown",
       null,
     ]);
-    expect(row("ops")).not.toHaveClass("cursor-grab");
-    expect(row("general")).toHaveClass("cursor-grab", "[-webkit-touch-callout:none]");
+    // A starred row is a link first, with a link's cursor, until it's being moved.
+    expect(row("general")).not.toHaveClass("cursor-grab");
+    expect(row("general")).toHaveClass("[-webkit-touch-callout:none]");
     expect(row("general")).toHaveAttribute("draggable", "false");
   });
 
