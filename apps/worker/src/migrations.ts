@@ -51,6 +51,7 @@ import agents from "../migrations/0050_agents.sql";
 import huddles from "../migrations/0051_huddles.sql";
 import postsRooms from "../migrations/0052_posts_rooms.sql";
 import commentReplies from "../migrations/0053_comment_replies.sql";
+import postsByAdmins from "../migrations/0054_posts_by_admins.sql";
 import searchIndex from "../search-migrations/0001_search_index.sql";
 import searchResults from "../search-migrations/0002_search_results.sql";
 import searchFilters from "../search-migrations/0003_search_filters.sql";
@@ -128,6 +129,7 @@ export const MIGRATIONS: Migration[] = [
   { name: "0051_huddles.sql", scope: "workspace", sql: huddles },
   { name: "0052_posts_rooms.sql", scope: "workspace", sql: postsRooms },
   { name: "0053_comment_replies.sql", scope: "room", sql: commentReplies },
+  { name: "0054_posts_by_admins.sql", scope: "workspace", sql: postsByAdmins },
 ];
 
 /**

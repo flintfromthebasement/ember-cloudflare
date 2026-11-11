@@ -86,6 +86,8 @@ export interface Uploader {
   user: User;
   tags: string[];
   authorizedAt: number;
+  /** Whether they only comment, in a posts room where only its admins start posts. */
+  postsBlocked?: boolean;
 }
 
 /**
@@ -100,7 +102,7 @@ async function uploaderIn(env: Env, credentials: Credentials, roomId: RoomId): P
   if (access.banned) return tooManyRequests();
   const { ip } = credentials.client;
   const tags = [access.user.id, sessionTag(access.sessionId), ...(ip !== null && ip.length <= MAX_ADDRESS_LENGTH ? [addressTag(ip)] : [])];
-  return { user: access.user, tags, authorizedAt: access.authorizedAt };
+  return { user: access.user, tags, authorizedAt: access.authorizedAt, postsBlocked: access.postsBlocked };
 }
 
 /**

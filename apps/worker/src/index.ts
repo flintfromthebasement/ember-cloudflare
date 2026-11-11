@@ -116,7 +116,7 @@ import type { BanProblem } from "./bans";
 import { BodyTooLarge, jsonBodyOf } from "./bodies";
 import { botPage, changeBot, createBot, deleteBot, listBots, resetBotKey, showBot } from "./bots/accounts";
 import { botAction, exception, isBotPath, withoutBotKeys } from "./bots/api";
-import { ADDRESS_HEADER, AUTHORIZED_AT_HEADER, BANNED_HEADER, HUDDLE_HEADER, ROOM_HEADER, SESSION_HEADER, USER_HEADER } from "./chat-room";
+import { ADDRESS_HEADER, AUTHORIZED_AT_HEADER, BANNED_HEADER, HUDDLE_HEADER, POSTS_BLOCKED_HEADER, ROOM_HEADER, SESSION_HEADER, USER_HEADER } from "./chat-room";
 import { guestSignIn, type Env } from "./env";
 import { failed, notFound } from "./error-pages";
 import { jsonWithETag } from "./etag";
@@ -1054,6 +1054,7 @@ async function connectToRoom(request: Request, env: Env, roomId: RoomId, huddle 
   headers.set(SESSION_HEADER, access.sessionId);
   headers.set(AUTHORIZED_AT_HEADER, String(access.authorizedAt));
   headers.set(BANNED_HEADER, String(access.banned));
+  headers.set(POSTS_BLOCKED_HEADER, String(access.postsBlocked));
   // Set either way, so that only the address a socket asks at says which it is.
   headers.set(HUDDLE_HEADER, String(huddle));
   // An address longer than any IP address isn't one a ban can hold, and would make too long a tag.

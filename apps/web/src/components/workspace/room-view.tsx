@@ -153,7 +153,17 @@ export function RoomView({ room, messageId, threadId, replyId, invitation, onDis
           {posts ? (
             <>
               {/* As wide as the feed's cards, with the room around them; a post opened on its own has none. */}
-              {threadId === undefined && <div className="mx-auto w-full max-w-[800px]">{composerShown}</div>}
+              {threadId === undefined && (
+                <div className="mx-auto w-full max-w-[800px]">
+                  {room.postsByAdmins && !me.administrator ? (
+                    <p className="mx-5 mt-3 rounded-[10px] border bg-surface px-4 py-3 text-sm text-muted-foreground max-md:mx-3">
+                      Only admins start posts in #{name}. Comment on any post below.
+                    </p>
+                  ) : (
+                    composerShown
+                  )}
+                </div>
+              )}
               <PostFeed
                 roomId={room.id}
                 roomName={name}

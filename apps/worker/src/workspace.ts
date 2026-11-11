@@ -466,6 +466,8 @@ export interface RoomAccess {
   member: boolean;
   /** Whether a ban blocks the IP address the socket comes from, which lets it read but not change anything. */
   banned: boolean;
+  /** Whether it's a posts room where only those who can change it start posts, and they can't, so they only comment. */
+  postsBlocked: boolean;
   /** When the Workspace checked, in milliseconds since the epoch. */
   authorizedAt: number;
 }
@@ -2503,7 +2505,14 @@ export class Workspace extends DurableObject<Env> {
     const user = await this.authenticate(credentials);
     if (!user) return null;
     if (!(await this.mayCreateRoomsAs(user.id))) return "forbidden";
-    const created: SharedRoom = { id: sortableId(), kind: room.kind, name: room.name, icon: room.icon || null, ...(room.posts && { posts: true }) };
+    const created: SharedRoom = {
+      id: sortableId(),
+      kind: room.kind,
+      name: room.name,
+      icon: room.icon || null,
+      ...(room.posts && { posts: true }),
+      ...(room.posts && room.postsByAdmins && { postsByAdmins: true }),
+    };
     const memberIds = await this.store.createRoom(created, user.id, room.kind === "closed" ? room.memberIds : null, new Date().toISOString());
     this.tell(memberIds, { type: "room.saved", room: created });
     return created;
@@ -3277,15 +3286,18 @@ export class Workspace extends DurableObject<Env> {
       const found = await this.store.roomToChange(roomId, user.id);
       if (!found) return "not found";
       if (!found.canAdminister) return "forbidden";
-      const { posts: _, ...unposted } = found.room;
+      const { posts: _, postsByAdmins: __, ...unposted } = found.room;
+      const posts = changes.posts ?? found.room.posts === true;
+      const postsByAdmins = posts && (changes.postsByAdmins ?? found.room.postsByAdmins === true);
       const changed: SharedRoom = {
-        ...(changes.posts === false ? unposted : found.room),
+        ...unposted,
         ...(changes.name && { name: changes.name }),
         ...(changes.kind && { kind: changes.kind }),
         ...(changes.icon !== undefined && { icon: changes.icon || null }),
-        ...(changes.posts && { posts: true }),
+        ...(posts && { posts: true }),
+        ...(postsByAdmins && { postsByAdmins: true }),
       };
-      if (!changes.name && !changes.kind && changes.icon === undefined && changes.posts === undefined) return changed;
+      if (!changes.name && !changes.kind && changes.icon === undefined && changes.posts === undefined && changes.postsByAdmins === undefined) return changed;
       const now = Date.now();
       // As when signing out, until the database says it queued nothing.
       let queued = changes.kind === "closed";
@@ -3595,8 +3607,8 @@ export class Workspace extends DurableObject<Env> {
     const session = await this.session(credentials);
     if (!session) return null;
     // From the database rather than what `isBanned` keeps, which a ban saving now hasn't changed yet.
-    const { member, banned } = await this.store.roomAccess(roomId, session.user.id, credentials.client.ip);
-    return { user: session.user, sessionId: session.id, member, banned, authorizedAt };
+    const { member, banned, postsBlocked } = await this.store.roomAccess(roomId, session.user.id, credentials.client.ip);
+    return { user: session.user, sessionId: session.id, member, banned, postsBlocked, authorizedAt };
   }
 
   /**
