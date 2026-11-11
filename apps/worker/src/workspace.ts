@@ -819,6 +819,12 @@ export class Workspace extends DurableObject<Env> {
     return accountOf(account, (await this.openedHuddleApp(account)) !== null);
   }
 
+  /** The addresses Ember is at, whose links a room doesn't preview, as the composer previews none at its own. */
+  async ownAddresses(): Promise<string[]> {
+    const account = await this.joinableAccount();
+    return account ? addressesOf(account) : [];
+  }
+
   private async joinableAccount(): Promise<JoinableAccount | null> {
     if (this.knownAccount) return this.knownAccount;
     const changes = this.accountChanges;
