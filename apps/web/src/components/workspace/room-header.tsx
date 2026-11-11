@@ -1,7 +1,7 @@
 import { useContext } from "react";
 import type { Favorites, Involvement, Me, Room, User } from "@ember/protocol";
 import { ChatBubbleEmpty, MoreHoriz, Search } from "@/components/icons/iconoir";
-import { RoomIcon } from "@/components/icons/room-icon";
+import { RoomIcon, shownRoomIcon } from "@/components/icons/room-icon";
 import { PageLink } from "@/components/page-link";
 import { useAccount } from "@/hooks/use-account";
 import { useNameOf } from "@/hooks/use-directory";
@@ -58,7 +58,7 @@ export function RoomHeader({ room, name, present, status, offline, favorite, onS
         {direct ? (
           <ChatBubbleEmpty className="size-5 shrink-0" />
         ) : (
-          <RoomIcon icon={room.icon} size={22} className="shrink-0 text-[23px] text-muted-foreground" />
+          <RoomIcon icon={shownRoomIcon(room)} size={22} className="shrink-0 text-[23px] text-muted-foreground" />
         )}
         <h1 className="truncate text-[17px] leading-[1.4] font-[650] max-md:text-base">
           {direct ? (

@@ -1,4 +1,4 @@
-import type { RoomIconName } from "@ember/protocol";
+import type { Room, RoomIconName } from "@ember/protocol";
 import { cn } from "@/lib/utils";
 
 // A room's icon, from the picker's catalog of Lucide and Iconoir icons in picker/. vite.config.ts serves
@@ -7,6 +7,13 @@ import { cn } from "@/lib/utils";
 /** Where icon `name` is served: a Lucide icon at /lucide/icons/<name>.svg, Iconoir's at /iconoir/icons/<variant>/<name>.svg. */
 export const roomIconUrl = (name: RoomIconName) =>
   name.startsWith("iconoir:") ? `/iconoir/icons/${name.split(":").slice(1).join("/")}.svg` : `/lucide/icons/${name}.svg`;
+
+/** The icon a posts room has until someone chooses one, which sets it apart from a room of chat's `#`. */
+export const POSTS_ROOM_ICON: RoomIconName = "iconoir:regular:post";
+
+/** The icon a room shows: the one chosen for it, or a posts room's, or null for `#`. A DM has none. */
+export const shownRoomIcon = (room: Room | null | undefined): RoomIconName | null =>
+  !room || room.kind === "direct" ? null : (room.icon ?? (room.posts ? POSTS_ROOM_ICON : null));
 
 interface Props {
   icon: RoomIconName | null;

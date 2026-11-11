@@ -1,7 +1,7 @@
 import { useId, useMemo, useState, type MouseEvent } from "react";
 import type { Favorites, Me, RoomId, SidebarRoom, User, UserId } from "@ember/protocol";
 import { ChatPlusIn, StarSolid } from "@/components/icons/iconoir";
-import { RoomIcon } from "@/components/icons/room-icon";
+import { RoomIcon, shownRoomIcon } from "@/components/icons/room-icon";
 import { useAccount } from "@/hooks/use-account";
 import { useNameOf } from "@/hooks/use-directory";
 import { useMounted } from "@/hooks/use-mounted";
@@ -155,7 +155,7 @@ export function Sidebar({
                   room.id === moving && "relative z-[1] cursor-grabbing bg-background! shadow-[0_4px_14px_var(--color-drag-shadow)] outline outline-muted-foreground",
                 )}
               >
-                <RoomIcon icon={room.icon} size={19} className="w-[18px] shrink-0 text-center text-[22px] leading-none text-muted-foreground" />
+                <RoomIcon icon={shownRoomIcon(room)} size={19} className="w-[18px] shrink-0 text-center text-[22px] leading-none text-muted-foreground" />
                 <span className="truncate">{room.name}</span>
                 {/* The dot and star sit together at the row's end, pushed there by one auto margin. The star's
                     muted at 65%. */}
