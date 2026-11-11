@@ -1,6 +1,6 @@
 import { COMMENT_REPLIES_PAGE_SIZE, POST_REPLIES_SHOWN, type Message, type RoomId, type RoomSettings, type SharedRoom, type Sidebar } from "@ember/protocol";
 import { beforeEach, describe, expect, it } from "vitest";
-import { api, connect, createRoom, freshDeploy, freshRoom, post, post as post_, signIn, workspaceSql, type Session, type Socket } from "./support";
+import { api, connect, createRoom, freshDeploy, freshRoom, post, post as post_, signIn, startUpload, workspaceSql, type Session, type Socket } from "./support";
 
 // Posts rooms, as a community's forum has them: every message is a post, answered in its thread, and the
 // room lists its posts newest activity first, each with its newest replies.
@@ -228,5 +228,42 @@ describe("Comments and their replies", () => {
     expect(await ada.next("post")).toMatchObject({ postId: one.id, post: { message: { id: one.id }, replies: [{ id: comment.id }], activeId: comment.id } });
     ada.send({ type: "post.open", postId: comment.id });
     expect(await ada.next("post")).toEqual({ type: "post", postId: comment.id, post: null });
+  });
+});
+
+describe("Posts rooms where only admins start posts", () => {
+  it("refuses a post from anyone but its admins and creator, who all comment and reply", async () => {
+    const [ada, grace] = [await signIn("Ada"), await signIn("Grace")];
+    const news = await createRoom("News", { posts: true, postsByAdmins: true, as: ada });
+    expect(news).toMatchObject({ posts: true, postsByAdmins: true });
+    const [adaSocket, graceSocket] = [await connect(news.id, ada), await connect(news.id, grace)];
+
+    const announcement = await post_(adaSocket, "<p>Version 3 is out</p>");
+    graceSocket.send({ type: "message.create", clientMessageId: crypto.randomUUID(), body: "<p>My own post</p>" });
+    expect(await graceSocket.next("error")).toMatchObject({ message: "Only admins start posts here. You can comment on them.", failed: "message.create" });
+    expect(await workspaceSql("SELECT count(*) AS n FROM rooms WHERE id = ? AND posts_by_admins = 1", news.id)).toEqual([{ n: 1 }]);
+    const comment = await reply(graceSocket, announcement, "<p>Congrats!</p>");
+    expect(comment.parentId).toBe(announcement.id);
+
+    const upload = await startUpload(grace, news.id, { name: "notes.txt", type: "text/plain", size: 5, clientMessageId: crypto.randomUUID() });
+    expect(upload.status).toBe(422);
+
+    // An administrator starts posts there too, as the Workspace says when they next connect.
+    await workspaceSql("UPDATE users SET role = 1 WHERE id = ?", grace.user.id);
+    const promoted = await connect(news.id, grace);
+    expect((await post_(promoted, "<p>From an admin</p>")).plainText).toBe("From an admin");
+  });
+
+  it("lets anyone post again once the setting's off, and keeps it only for a posts room", async () => {
+    const [ada, grace] = [await signIn("Ada"), await signIn("Grace")];
+    const news = await createRoom("News", { posts: true, postsByAdmins: true, as: ada });
+    const changed = ((await (await change(news.id, ada, { postsByAdmins: false })).json()) as { room: SharedRoom }).room;
+    expect(changed).not.toHaveProperty("postsByAdmins");
+    const graceSocket = await connect(news.id, grace);
+    expect((await post_(graceSocket, "<p>Anyone posts</p>")).plainText).toBe("Anyone posts");
+
+    const chat = await createRoom("Chat", { postsByAdmins: true, as: ada });
+    expect(chat).not.toHaveProperty("postsByAdmins");
+    expect(((await (await change(news.id, ada, { postsByAdmins: true, posts: false })).json()) as { room: SharedRoom }).room).not.toHaveProperty("postsByAdmins");
   });
 });

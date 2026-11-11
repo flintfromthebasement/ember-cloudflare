@@ -20,6 +20,8 @@ function renderForm(props: Partial<ComponentProps<typeof RoomForm<User>>> = {}, 
       onIconChange={vi.fn()}
       posts={false}
       onPostsChange={vi.fn()}
+      postsByAdmins={false}
+      onPostsByAdminsChange={vi.fn()}
       everyone={null}
       groups={[people(3)]}
       mark={() => <CheckMark />}

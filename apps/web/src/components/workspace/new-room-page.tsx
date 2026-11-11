@@ -37,6 +37,7 @@ export function NewRoomPage({ access, me, onCreated, onFailed }: Props) {
   const [name, setName] = useState(DEFAULT_ROOM_NAME);
   const [icon, setIcon] = useState<RoomIconName | null>(null);
   const [posts, setPosts] = useState(false);
+  const [postsByAdmins, setPostsByAdmins] = useState(false);
   const [chosen, setChosen] = useState<ReadonlySet<UserId>>(new Set());
   const [saving, setSaving] = useState(false);
   // The room the unsaved changes dialog's Save made, while the app goes on to where the person was going.
@@ -66,7 +67,7 @@ export function NewRoomPage({ access, me, onCreated, onFailed }: Props) {
   /** Creates the room and lists it in the sidebar. */
   const send = () => {
     // The private form lists its creator with a check mark and sends them as one of its members.
-    const kept = posts ? { posts } : {};
+    const kept = posts ? { posts, ...(postsByAdmins && { postsByAdmins }) } : {};
     const room: NewRoom = access === "open" ? { kind: access, name, icon: icon ?? "", ...kept } : { kind: access, name, icon: icon ?? "", ...kept, memberIds: [me.id, ...chosen] };
     return createRoom(room).then((room) => {
       onCreated(room);
@@ -109,6 +110,8 @@ export function NewRoomPage({ access, me, onCreated, onFailed }: Props) {
             icon={icon}
             posts={posts}
             onPostsChange={setPosts}
+            postsByAdmins={postsByAdmins}
+            onPostsByAdminsChange={setPostsByAdmins}
             onIconChange={setIcon}
             everyone={{ on: access === "open", onFlip: () => navigate(newRoomPath(access === "open" ? "closed" : "open"), { replace: true }) }}
             groups={[people]}

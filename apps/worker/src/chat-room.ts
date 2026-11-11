@@ -77,6 +77,8 @@ interface Attachment extends Viewing {
   banned?: true;
   /** Set while the tab is typing, from its typing.start until its typing.stop or message, so closing it stops only typing it did. */
   typing?: true;
+  /** Set in a posts room where only its admins start posts, for someone who isn't one, who comments and replies only. */
+  postsBlocked?: true;
 }
 
 export const USER_HEADER = "X-Ember-User";
@@ -88,6 +90,8 @@ export const AUTHORIZED_AT_HEADER = "X-Ember-Authorized-At";
 export const ADDRESS_HEADER = "X-Ember-Address";
 /** "true" when a ban blocks the IP address the socket comes from. */
 export const BANNED_HEADER = "X-Ember-Banned";
+/** "true" when it's a posts room where only its admins start posts, and the socket's person isn't one. */
+export const POSTS_BLOCKED_HEADER = "X-Ember-Posts-Blocked";
 /** "true" on a socket for the room's huddle, rather than for the room itself. */
 export const HUDDLE_HEADER = "X-Ember-Huddle";
 
@@ -167,6 +171,9 @@ const NO_WEBHOOK = "the bot has been deleted, has left the room or has no webhoo
 const WEBHOOK_CHANGED = "the bot has been deleted, has left the room or its webhook has changed";
 /** Why the room posts nothing of what a bot says back to a reply in a thread: the thread's message was deleted while the delivery ran. */
 const THREAD_GONE = "the thread's message has been deleted";
+
+/** Why the room refuses a post from someone who isn't one of its admins, in a posts room where only they start posts. */
+export const ADMINS_POST = "Only admins start posts here. You can comment on them.";
 
 /** How many of a room's questions for @ember and the agents it answers at once, and how many more can wait, as each waits on a model. */
 const ANSWERS_AT_ONCE = 4;
@@ -266,6 +273,7 @@ export class ChatRoom extends DurableObject<Env> {
     if (!user || !roomId || !sessionId || !Number.isFinite(authorizedAt)) return new Response("Missing user, room, session or time", { status: 400 });
     const address = request.headers.get(ADDRESS_HEADER);
     const banned = request.headers.get(BANNED_HEADER) === "true";
+    const postsBlocked = request.headers.get(POSTS_BLOCKED_HEADER) === "true";
     const tags = [user.id, sessionTag(sessionId), ...(address ? [addressTag(address)] : [])];
     if (request.headers.get(HUDDLE_HEADER) === "true") {
       // A banned address reads the room and changes nothing in it, and the Worker turns it away from the huddle.
@@ -280,7 +288,7 @@ export class ChatRoom extends DurableObject<Env> {
       if (refused) return closedAtOnce(CloseCode.Reconnect);
       const { 0: client, 1: server } = new WebSocketPair();
       this.ctx.acceptWebSocket(server, tags);
-      server.serializeAttachment({ user, roomId, visible, protocol, heardAt: Date.now(), ...(banned && { banned }) } satisfies Attachment);
+      server.serializeAttachment({ user, roomId, visible, protocol, heardAt: Date.now(), ...(banned && { banned }), ...(postsBlocked && { postsBlocked }) } satisfies Attachment);
 
       this.send(server, { ...opening, you: user, present: this.present() });
       // A tab running an older app hears at once that it has to reload, rather than once it sends something.
@@ -589,11 +597,12 @@ export class ChatRoom extends DurableObject<Env> {
    * deleted, after the Workspace checked, as it turns away a socket then, or `MESSAGE_GONE` when it has
    * no such thread. The alarm comes back once it's a day old, to delete it from R2 if it's unfinished.
    */
-  async startUpload(roomId: RoomId, uploader: Uploader, file: NewUpload): Promise<{ key: string } | typeof MESSAGE_GONE | null> {
+  async startUpload(roomId: RoomId, uploader: Uploader, file: NewUpload): Promise<{ key: string } | typeof MESSAGE_GONE | typeof ADMINS_POST | null> {
     const startedAt = Date.now();
     const started = await this.serially(async () => {
       if (await this.revocationsFor(roomId).refuse(uploader.tags, uploader.authorizedAt)) return null;
       if (file.parentId !== undefined && !(await this.inThread(this.storeFor(roomId), file.parentId, false))) return MESSAGE_GONE;
+      if (file.parentId === undefined && uploader.postsBlocked) return ADMINS_POST;
       const key = base36(KEY_LENGTH);
       const blob = {
         id: key,
@@ -809,6 +818,10 @@ export class ChatRoom extends DurableObject<Env> {
         if (isOutdated(ws)) return this.send(ws, { type: "error", message: OUTDATED, clientMessageId: frame.clientMessageId, failed: frame.type });
         const inThread = frame.parentId === undefined ? undefined : await this.inThread(store, frame.parentId, frame.alsoSend === true, frame.replyToId);
         if (inThread === null) return this.send(ws, { type: "error", message: MESSAGE_GONE, clientMessageId: frame.clientMessageId, failed: frame.type });
+        // As the Workspace said when it let the socket in, so a message never waits on it.
+        if (!inThread && (ws.deserializeAttachment() as Attachment).postsBlocked) {
+          return this.send(ws, { type: "error", message: ADMINS_POST, clientMessageId: frame.clientMessageId, failed: frame.type });
+        }
         const body = await this.prepare(frame.body);
         if (typeof body === "string") return this.send(ws, { type: "error", message: body, clientMessageId: frame.clientMessageId, failed: frame.type });
         await this.create(store, user, frame.clientMessageId, body, now, { inThread });

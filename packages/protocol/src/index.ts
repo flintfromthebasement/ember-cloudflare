@@ -230,6 +230,11 @@ export interface SharedRoom {
    * room of chat.
    */
   posts?: true;
+  /**
+   * For a posts room, whether only those who can change it, its administrators and its creator, start
+   * posts, as an announcements room has it, while everyone in it comments and replies. Left out otherwise.
+   */
+  postsByAdmins?: true;
 }
 
 /**
@@ -324,7 +329,7 @@ export const suggestedCount = (peopleInDirects: number) => Math.max(0, SUGGESTED
  * A room to create: an open room takes in everyone, and a closed one only the people `memberIds` names.
  * Without an icon, it has the default `#`.
  */
-export type NewRoom = { name: string; icon?: RoomIconChoice; posts?: boolean } & ({ kind: "open" } | { kind: "closed"; memberIds: UserId[] });
+export type NewRoom = { name: string; icon?: RoomIconChoice; posts?: boolean; postsByAdmins?: boolean } & ({ kind: "open" } | { kind: "closed"; memberIds: UserId[] });
 
 /** Someone active, as a room's settings list them, with whether they're in the room. */
 export interface RoomPerson extends User {
@@ -363,7 +368,7 @@ export interface RoomSettings {
  * it's a posts room, and who
  * it's for, everyone or just the people `memberIds` names, which takes anyone else out of it.
  */
-export type RoomChanges = { name?: string; icon?: RoomIconChoice; posts?: boolean } & ({ kind?: "open" } | { kind: "closed"; memberIds: UserId[] });
+export type RoomChanges = { name?: string; icon?: RoomIconChoice; posts?: boolean; postsByAdmins?: boolean } & ({ kind?: "open" } | { kind: "closed"; memberIds: UserId[] });
 
 /**
  * The rail's buttons and the appearance modes, whose icons an administrator can choose in Community
@@ -1993,6 +1998,9 @@ const ICON_REFUSED = 'Icon must be one of the room icons, or "" for the default'
 /** Why a room's posts setting is refused: it's true or false, or left out. */
 const POSTS_REFUSED = "Posts must be true or false";
 
+/** Why a posts room's who-starts-posts setting is refused: it's true or false, or left out. */
+const POSTS_BY_ADMINS_REFUSED = "Posts by admins must be true or false";
+
 /**
  * A room's icon: undefined when it's left out, which keeps the icon, or null when it's neither "" nor
  * exactly an icon's name.
@@ -2012,10 +2020,12 @@ export function parseNewRoom(data: unknown): NewRoom | string {
   const icon = iconChoice(r.icon);
   if (icon === null) return ICON_REFUSED;
   if (r.posts !== undefined && typeof r.posts !== "boolean") return POSTS_REFUSED;
+  if (r.postsByAdmins !== undefined && typeof r.postsByAdmins !== "boolean") return POSTS_BY_ADMINS_REFUSED;
   const posts = r.posts === true || undefined;
-  if (r.kind === "open") return { kind: r.kind, name, icon, posts };
+  const postsByAdmins = (posts && r.postsByAdmins === true) || undefined;
+  if (r.kind === "open") return { kind: r.kind, name, icon, posts, postsByAdmins };
   const memberIds = r.memberIds ?? [];
-  return userIds(memberIds) ? { kind: r.kind, name, icon, posts, memberIds } : `Members must be a list of at most ${MAX_LISTED_USERS} user ids`;
+  return userIds(memberIds) ? { kind: r.kind, name, icon, posts, postsByAdmins, memberIds } : `Members must be a list of at most ${MAX_LISTED_USERS} user ids`;
 }
 
 /**
@@ -2030,7 +2040,8 @@ export function parseRoomChanges(data: unknown): RoomChanges | string {
   const icon = iconChoice(r.icon);
   if (icon === null) return ICON_REFUSED;
   if (r.posts !== undefined && typeof r.posts !== "boolean") return POSTS_REFUSED;
-  const changes = { name, icon, posts: r.posts as boolean | undefined };
+  if (r.postsByAdmins !== undefined && typeof r.postsByAdmins !== "boolean") return POSTS_BY_ADMINS_REFUSED;
+  const changes = { name, icon, posts: r.posts as boolean | undefined, postsByAdmins: r.postsByAdmins as boolean | undefined };
   if (r.kind === undefined) return changes;
   if (r.kind === "open") return { ...changes, kind: r.kind };
   if (r.kind !== "closed") return 'Kind must be "open" or "closed"';

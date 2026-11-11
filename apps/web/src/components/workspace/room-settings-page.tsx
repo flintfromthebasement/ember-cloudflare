@@ -55,6 +55,7 @@ export function RoomSettingsPage({ roomId, access, me, askForRoom, onMissing, on
   const [name, setName] = useState("");
   const [icon, setIcon] = useState<RoomIconName | null>(null);
   const [posts, setPosts] = useState(false);
+  const [postsByAdmins, setPostsByAdmins] = useState(false);
   // Who the private form lets in, starting with the room's members.
   const [chosen, setChosen] = useState<ReadonlySet<UserId>>(new Set());
   // Saving or deleting, either of which keeps both buttons from being pressed until it answers.
@@ -75,6 +76,7 @@ export function RoomSettingsPage({ roomId, access, me, askForRoom, onMissing, on
         setName(settings.room.name);
         setIcon(settings.room.icon);
         setPosts(settings.room.posts === true);
+        setPostsByAdmins(settings.room.postsByAdmins === true);
         setChosen(membersOf(settings));
       },
       (error: unknown) => {
@@ -109,7 +111,10 @@ export function RoomSettingsPage({ roomId, access, me, askForRoom, onMissing, on
    */
   const send = () => {
     // The posts setting goes only when it changed, as most saves leave it.
-    const switched = settings !== null && posts !== (settings.room.posts === true) ? { posts } : {};
+    const switched = {
+      ...(settings !== null && posts !== (settings.room.posts === true) && { posts }),
+      ...(settings !== null && posts && postsByAdmins !== (settings.room.postsByAdmins === true) && { postsByAdmins }),
+    };
     const changes: RoomChanges =
       access === "open" ? { name, icon: icon ?? "", ...switched, kind: access } : { name, icon: icon ?? "", ...switched, kind: access, memberIds: [...chosen] };
     const leaving = access === "closed" && !chosen.has(me.id);
@@ -152,7 +157,7 @@ export function RoomSettingsPage({ roomId, access, me, askForRoom, onMissing, on
   const changed =
     !!settings?.canAdminister &&
     !busy &&
-    (name !== settings.room.name || icon !== settings.room.icon || posts !== (settings.room.posts === true) || access !== opened || (!open && !sameMembers(chosen, membersOf(settings))));
+    (name !== settings.room.name || icon !== settings.room.icon || posts !== (settings.room.posts === true) || (posts && postsByAdmins !== (settings.room.postsByAdmins === true)) || access !== opened || (!open && !sameMembers(chosen, membersOf(settings))));
   // The Everyone switch moves between the room's two forms, keeping the draft.
   const stays = useCallback((path: string) => path === roomSettingsPath("open", roomId) || path === roomSettingsPath("closed", roomId), [roomId]);
   return (
@@ -168,6 +173,8 @@ export function RoomSettingsPage({ roomId, access, me, askForRoom, onMissing, on
             icon={icon}
             posts={posts}
             onPostsChange={setPosts}
+            postsByAdmins={postsByAdmins}
+            onPostsByAdminsChange={setPostsByAdmins}
             onIconChange={setIcon}
             // The private form has the Everyone row only for whoever can change the room.
             everyone={settings.canAdminister ? { on: open, onFlip: flip } : open ? { on: true } : null}
