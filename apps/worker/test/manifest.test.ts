@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { api, apiWith, builtPages, cookieOf, freshDeploy } from "./support";
 
-const manifest = async (path = "/webmanifest.json") => (await (await api(path)).json()) as Record<string, unknown>;
+// Without a short name, whatever wrangler.jsonc's vars say.
+const manifest = async (path = "/webmanifest.json") => (await (await apiWith({ EMBER_APP_SHORT_NAME: undefined }, path)).json()) as Record<string, unknown>;
 
 beforeEach(freshDeploy);
 
