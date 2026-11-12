@@ -51,6 +51,12 @@ describe("Web app manifest", () => {
     });
   });
 
+  it("gives the app a short name only when EMBER_APP_SHORT_NAME sets one", async () => {
+    expect(await manifest()).not.toHaveProperty("short_name");
+    expect(await (await apiWith({ EMBER_APP_SHORT_NAME: " Engines " }, "/webmanifest.json")).json()).toMatchObject({ name: "Ember", short_name: "Engines" });
+    expect(await (await apiWith({ EMBER_APP_SHORT_NAME: " " }, "/webmanifest.json")).json()).not.toHaveProperty("short_name");
+  });
+
   it("answers at /webmanifest too, and refuses any format but JSON", async () => {
     expect(await manifest("/webmanifest")).toEqual(await manifest());
     for (const path of ["/webmanifest.html", "/webmanifest.xml", "/webmanifest.js"]) {

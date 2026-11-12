@@ -41,6 +41,8 @@ export interface Env {
   EMBER_SETUP_NAME_PLACEHOLDER?: string;
   /** What the Set up Ember form suggests for their email address in place of "kevin@kevinrose.com". */
   EMBER_SETUP_EMAIL_PLACEHOLDER?: string;
+  /** The installed app's home screen label (the manifest's `short_name`), for a workspace name too long to fit. */
+  EMBER_APP_SHORT_NAME?: string;
   /**
    * The setup password, which the Set up Ember page asks for, so that only whoever deployed Ember sets
    * it up (setup.ts). Deploy to Cloudflare's form asks the deployer to make one up. With neither it nor

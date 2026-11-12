@@ -106,6 +106,9 @@ The setup form suggests Kevin Rose and kevin@kevinrose.com for the administrator
 own, set the Worker's `EMBER_SETUP_NAME_PLACEHOLDER` and `EMBER_SETUP_EMAIL_PLACEHOLDER` variables,
 in `vars` in `wrangler.jsonc` for instance.
 
+An installed Ember is named after the workspace. Phones cut a long name short under the home screen
+icon, so to give it a shorter label there, set the Worker's `EMBER_APP_SHORT_NAME` variable the same way.
+
 The administrator then signs in at `/session/new` with the email address and password they set up
 with, and invites people with the join link on general's welcome card.
 
