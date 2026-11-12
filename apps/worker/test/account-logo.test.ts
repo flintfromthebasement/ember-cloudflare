@@ -189,15 +189,16 @@ describe("Workspace logo", () => {
     expect(await head.text()).toBe("");
   });
 
-  it("tells every open page of the logo's address, and names it in the manifest's icons", async () => {
+  it("tells every open page of the logo's address, and names it in the manifest's icons, none of them maskable", async () => {
     const ada = await setUp();
     const grace = await signIn("Grace Hopper");
     const socket = await openWorkspaceSocket(grace);
 
     const account = await uploadBlackHole(ada);
     expect(await socket.next()).toEqual({ type: "account.updated", account });
-    const manifest = (await (await api("/webmanifest.json")).json()) as { icons: Array<{ src: string }> };
-    expect(manifest.icons.map(({ src }) => src)).toEqual([`${account.logo}&size=small`, account.logo, account.logo]);
+    const manifest = (await (await api("/webmanifest.json")).json()) as { icons: Array<{ src: string; purpose?: string }> };
+    expect(manifest.icons.map(({ src }) => src)).toEqual([`${account.logo}&size=small`, account.logo]);
+    expect(manifest.icons.some(({ purpose }) => purpose === "maskable")).toBe(false);
   });
 
   it("gives the logo a new address whenever the account changes, as renaming the workspace does", async () => {

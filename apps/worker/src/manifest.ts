@@ -11,19 +11,23 @@ import { ACCOUNT_NAME, workspace } from "./workspace";
 const DESCRIPTION = "A real-time chat app that runs entirely on Cloudflare.";
 
 /**
- * The manifest for a workspace named `name` whose logo is at `logo`. Its icons are the logo's variants,
- * or Ember's stock icons while there's no logo. Its screenshots have Campfire's sizes and labels, but
- * they're Ember's own, which `pnpm screenshots` makes.
+ * The manifest for a workspace named `name` whose logo is at `logo`, with `shortName` as the home screen
+ * label when there is one. Its icons are the logo's variants, or Ember's stock icons while there's no
+ * logo. Only the stock icon is offered as maskable: an uploaded logo can reach its edges, which Android
+ * would crop, so Android sets it on a plain circle instead. Its screenshots have Campfire's sizes and
+ * labels, but they're Ember's own, which `pnpm screenshots` makes.
  */
-export function webManifest(name: string, logo: string | null) {
+export function webManifest(name: string, logo: string | null, shortName?: string) {
   const [small, large] = logo ? [`${logo}&size=small`, logo] : ["/logos/app-icon-192.png", "/logos/app-icon.png"];
+  const icons: Array<{ src: string; type: string; sizes: string; purpose?: string }> = [
+    { src: small, type: "image/png", sizes: "192x192" },
+    { src: large, type: "image/png", sizes: "512x512" },
+  ];
+  if (!logo) icons.push({ src: large, type: "image/png", sizes: "512x512", purpose: "maskable" });
   return {
     name,
-    icons: [
-      { src: small, type: "image/png", sizes: "192x192" },
-      { src: large, type: "image/png", sizes: "512x512" },
-      { src: large, type: "image/png", sizes: "512x512", purpose: "maskable" },
-    ],
+    ...(shortName ? { short_name: shortName } : {}),
+    icons,
     start_url: "/",
     display: "standalone",
     scope: "/",
@@ -55,7 +59,7 @@ export async function manifest(env: Env, format: string): Promise<Response> {
   // It's answered only as JSON.
   if (format !== "" && format !== "json") return new Response(null, { status: 406 });
   const account = await workspace(env).account();
-  return new Response(JSON.stringify(webManifest(account?.name ?? ACCOUNT_NAME, account?.logo ?? null)), {
+  return new Response(JSON.stringify(webManifest(account?.name ?? ACCOUNT_NAME, account?.logo ?? null, env.EMBER_APP_SHORT_NAME?.trim() || undefined)), {
     // Revalidated every time, so an installed app finds a renamed workspace or a new logo.
     headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-cache" },
   });
